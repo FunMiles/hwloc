@@ -278,7 +278,7 @@
 #cmakedefine HAVE_MEMALIGN @HAVE_MEMALIGN@
 
 /* Define to 1 if you have the <memory.h> header file. */
-#cmakedefine HAVE_MEMORY_H @HAVE_MEMORY_H@
+/* #cmakedefine HAVE_MEMORY_H @HAVE_MEMORY_H@ */
 
 /* Define to 1 if you have the `mkstemp' function. */
 #define HAVE_MKSTEMP 1
@@ -617,10 +617,10 @@
 #define HWLOC_HAVE_FLSL 1
 
 /* Define to 1 if gcc -Wcast-function-type is supported and enabled */
-/* #undef HWLOC_HAVE_GCC_W_CAST_FUNCTION_TYPE */
+#define HWLOC_HAVE_GCC_W_CAST_FUNCTION_TYPE 1
 
 /* Define to 1 if gcc -Wmissing-field-initializers is supported and enabled */
-/* #undef HWLOC_HAVE_GCC_W_MISSING_FIELD_INITIALIZERS */
+#define HWLOC_HAVE_GCC_W_MISSING_FIELD_INITIALIZERS 1
 
 /* Define to 1 if you have the GL module components. */
 /* #undef HWLOC_HAVE_GL */

@@ -5,6 +5,10 @@ project(hwloc
 
 enable_testing()
 
+if( CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR )
+    set( STANDALONE TRUE )
+endif()
+
 option(HWLOC_ENABLE_TESTING "Enable testing" ON)
 option(HWLOC_SKIP_LSTOPO "don't build/install lstopo")
 option(HWLOC_SKIP_TOOLS "don't build/install other hwloc tools")
@@ -99,9 +103,10 @@ configure_file(${OS_CONTRIB_DIR}/static-components.h.in include/static-component
 
 # Library
 
-add_compile_definitions($<$<CONFIG:DEBUG>:HWLOC_DEBUG=1>)
+# Turning on HWLOC_DEBUG makes code crash in some assert.
+#add_compile_definitions($<$<CONFIG:DEBUG>:HWLOC_DEBUG=1>)
 
-# FIXME dll soname!!!
+#
 add_library(hwloc)
 add_library(hwloc::hwloc ALIAS hwloc)
 target_sources(hwloc PRIVATE
@@ -152,96 +157,101 @@ if (APPLE)
     target_link_libraries(hwloc PUBLIC "-framework CoreFoundation" "-framework IOKit")
 endif ()
 
-# Tools under utils/hwloc
+if (STANDALONE)
+    if(HWLOC_ENABLE_TESTING)
+        add_subdirectory(${TOPDIR}/tests/hwloc ${CMAKE_CURRENT_BINARY_DIR}/tests/hwloc)
+    endif()
+    # Tools under utils/hwloc
 
-if(NOT HWLOC_SKIP_TOOLS)
+    if (NOT HWLOC_SKIP_TOOLS)
 
-    set(TOOLS
-            hwloc-bind
-            hwloc-calc
-            hwloc-diff
-            hwloc-distrib
-            hwloc-gather-cpuid
-            hwloc-info
-            hwloc-patch
-            )
+        set(TOOLS
+                hwloc-bind
+                hwloc-calc
+                hwloc-diff
+                hwloc-distrib
+                hwloc-gather-cpuid
+                hwloc-info
+                hwloc-patch
+                )
 
-    foreach(tool IN ITEMS ${TOOLS})
-        add_executable(${tool}
-                ${TOPDIR}/utils/hwloc/${tool}.c)
-        target_link_libraries(${tool} hwloc)
-    endforeach(tool)
+        foreach (tool IN ITEMS ${TOOLS})
+            add_executable(${tool}
+                    ${TOPDIR}/utils/hwloc/${tool}.c)
+            target_link_libraries(${tool} hwloc)
+        endforeach (tool)
 
-endif()
+    endif ()
 
-if(NOT HWLOC_SKIP_LSTOPO)
+    if (NOT HWLOC_SKIP_LSTOPO)
 
-    set(LSTOPOS
-            lstopo-no-graphics
-#            lstopo
-#            lstopo-win
-            )
+        set(LSTOPOS
+                lstopo-no-graphics
+                #            lstopo
+                #            lstopo-win
+                )
 
-#    set(LSTOPO_COMMON_SOURCES
-#            ${TOPDIR}/utils/lstopo/lstopo.c
-#            ${TOPDIR}/utils/lstopo/lstopo-draw.c
-#            ${TOPDIR}/utils/lstopo/lstopo-tikz.c
-#            ${TOPDIR}/utils/lstopo/lstopo-fig.c
-#            ${TOPDIR}/utils/lstopo/lstopo-svg.c
-#            ${TOPDIR}/utils/lstopo/lstopo-ascii.c
-#            ${TOPDIR}/utils/lstopo/lstopo-text.c
-#            ${TOPDIR}/utils/lstopo/lstopo-xml.c
-#            ${TOPDIR}/utils/hwloc/common-ps.c
-#            )
-#
-#    add_executable(lstopo-no-graphics
-#            ${LSTOPO_COMMON_SOURCES}
-#            )
-#    target_link_libraries(lstopo-no-graphics PRIVATE hwloc)
+        #    set(LSTOPO_COMMON_SOURCES
+        #            ${TOPDIR}/utils/lstopo/lstopo.c
+        #            ${TOPDIR}/utils/lstopo/lstopo-draw.c
+        #            ${TOPDIR}/utils/lstopo/lstopo-tikz.c
+        #            ${TOPDIR}/utils/lstopo/lstopo-fig.c
+        #            ${TOPDIR}/utils/lstopo/lstopo-svg.c
+        #            ${TOPDIR}/utils/lstopo/lstopo-ascii.c
+        #            ${TOPDIR}/utils/lstopo/lstopo-text.c
+        #            ${TOPDIR}/utils/lstopo/lstopo-xml.c
+        #            ${TOPDIR}/utils/hwloc/common-ps.c
+        #            )
+        #
+        #    add_executable(lstopo-no-graphics
+        #            ${LSTOPO_COMMON_SOURCES}
+        #            )
+        #    target_link_libraries(lstopo-no-graphics PRIVATE hwloc)
 
-#    add_executable(lstopo
-#            ${LSTOPO_COMMON_SOURCES}
-##            ${TOPDIR}/utils/lstopo/lstopo-windows.c
-#            )
-#    target_compile_definitions(lstopo PRIVATE LSTOPO_HAVE_GRAPHICS)
+        #    add_executable(lstopo
+        #            ${LSTOPO_COMMON_SOURCES}
+        ##            ${TOPDIR}/utils/lstopo/lstopo-windows.c
+        #            )
+        #    target_compile_definitions(lstopo PRIVATE LSTOPO_HAVE_GRAPHICS)
 
-#    add_executable(lstopo-win WIN32
-#            ${LSTOPO_COMMON_SOURCES}
-#            ${TOPDIR}/utils/lstopo/lstopo-windows.c
-#            )
-#    target_compile_definitions(lstopo-win PRIVATE LSTOPO_HAVE_GRAPHICS)
-#    target_link_options(lstopo-win PRIVATE "$<$<BOOL:${MSVC}>:/subsystem:windows;/entry:mainCRTStartup>")
+        #    add_executable(lstopo-win WIN32
+        #            ${LSTOPO_COMMON_SOURCES}
+        #            ${TOPDIR}/utils/lstopo/lstopo-windows.c
+        #            )
+        #    target_compile_definitions(lstopo-win PRIVATE LSTOPO_HAVE_GRAPHICS)
+        #    target_link_options(lstopo-win PRIVATE "$<$<BOOL:${MSVC}>:/subsystem:windows;/entry:mainCRTStartup>")
 
 
+    endif ()
 
-endif()
+    include(GNUInstallDirs)
+    include(CMakePackageConfigHelpers)
 
-include(GNUInstallDirs)
-include(CMakePackageConfigHelpers)
+    install(TARGETS hwloc
+            EXPORT ${PROJECT_NAME}_Targets
+            FILE_SET HEADERS
+            ARCHIVE DESTINATION lib
+            LIBRARY DESTINATION lib
+            RUNTIME DESTINATION bin
+            INCLUDES DESTINATION include)
 
-install(TARGETS hwloc
-        EXPORT ${PROJECT_NAME}_Targets
-        FILE_SET HEADERS
-        ARCHIVE DESTINATION lib
-        LIBRARY DESTINATION lib
-        RUNTIME DESTINATION bin
-        INCLUDES DESTINATION include)
+    install(EXPORT ${PROJECT_NAME}_Targets
+            FILE ${PROJECT_NAME}Targets.cmake
+            NAMESPACE ${PROJECT_NAME}::
+            DESTINATION lib/cmake/hwloc)
 
-install(EXPORT ${PROJECT_NAME}_Targets
-        FILE ${PROJECT_NAME}Targets.cmake
-        NAMESPACE ${PROJECT_NAME}::
-        DESTINATION lib/cmake/hwloc)
+    write_basic_package_version_file("${PROJECT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
+            VERSION ${PROJECT_VERSION}
+            COMPATIBILITY SameMajorVersion)
 
-write_basic_package_version_file("${PROJECT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
-        VERSION ${PROJECT_VERSION}
-        COMPATIBILITY SameMajorVersion)
+    configure_package_config_file(
+            "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in"
+            "${PROJECT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
+            INSTALL_DESTINATION
+            ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/cmake)
 
-configure_package_config_file(
-        "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in"
-        "${PROJECT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
-        INSTALL_DESTINATION
-        ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/cmake)
+    install(FILES "${PROJECT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
+            "${PROJECT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/cmake)
 
-install(FILES "${PROJECT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
-        "${PROJECT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/cmake)
+endif ()
