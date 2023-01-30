@@ -101,7 +101,7 @@ configure_file(${OS_CONTRIB_DIR}/static-components.h.in include/static-component
 
 add_compile_definitions($<$<CONFIG:DEBUG>:HWLOC_DEBUG=1>)
 
-# FIXME dll soname
+# FIXME dll soname!!!
 add_library(hwloc)
 add_library(hwloc::hwloc ALIAS hwloc)
 target_sources(hwloc PRIVATE
@@ -128,7 +128,7 @@ target_sources(hwloc PRIVATE
         $<$<BOOL:${HWLOC_HAVE_OPENCL}>:${TOPDIR}/hwloc/topology-opencl.c>
         $<$<BOOL:${HAVE_CUDA}>:${TOPDIR}/hwloc/topology-cuda.c>
         PUBLIC FILE_SET HEADERS
-        BASE_DIRS ${PROJECT_SOURCE_DIR}/include ${CMAKE_BINARY_DIR}/include/
+        BASE_DIRS ${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/include/
         FILES
         include/hwloc.h
         include/hwloc/rename.h
@@ -141,8 +141,8 @@ target_sources(hwloc PRIVATE
         include/hwloc/distances.h
         include/hwloc/diff.h
         include/hwloc/deprecated.h
-        ${CMAKE_BINARY_DIR}/include/hwloc/autogen/config.h
-        ${CMAKE_BINARY_DIR}/include/private/autogen/config.h
+        ${CMAKE_CURRENT_BINARY_DIR}/include/hwloc/autogen/config.h
+        ${CMAKE_CURRENT_BINARY_DIR}/include/private/autogen/config.h
         )
 
 if (APPLE)
@@ -181,22 +181,22 @@ if(NOT HWLOC_SKIP_LSTOPO)
 #            lstopo-win
             )
 
-    set(LSTOPO_COMMON_SOURCES
-            ${TOPDIR}/utils/lstopo/lstopo.c
-            ${TOPDIR}/utils/lstopo/lstopo-draw.c
-            ${TOPDIR}/utils/lstopo/lstopo-tikz.c
-            ${TOPDIR}/utils/lstopo/lstopo-fig.c
-            ${TOPDIR}/utils/lstopo/lstopo-svg.c
-            ${TOPDIR}/utils/lstopo/lstopo-ascii.c
-            ${TOPDIR}/utils/lstopo/lstopo-text.c
-            ${TOPDIR}/utils/lstopo/lstopo-xml.c
-            ${TOPDIR}/utils/hwloc/common-ps.c
-            )
-
-    add_executable(lstopo-no-graphics
-            ${LSTOPO_COMMON_SOURCES}
-            )
-    target_link_libraries(lstopo-no-graphics PRIVATE hwloc)
+#    set(LSTOPO_COMMON_SOURCES
+#            ${TOPDIR}/utils/lstopo/lstopo.c
+#            ${TOPDIR}/utils/lstopo/lstopo-draw.c
+#            ${TOPDIR}/utils/lstopo/lstopo-tikz.c
+#            ${TOPDIR}/utils/lstopo/lstopo-fig.c
+#            ${TOPDIR}/utils/lstopo/lstopo-svg.c
+#            ${TOPDIR}/utils/lstopo/lstopo-ascii.c
+#            ${TOPDIR}/utils/lstopo/lstopo-text.c
+#            ${TOPDIR}/utils/lstopo/lstopo-xml.c
+#            ${TOPDIR}/utils/hwloc/common-ps.c
+#            )
+#
+#    add_executable(lstopo-no-graphics
+#            ${LSTOPO_COMMON_SOURCES}
+#            )
+#    target_link_libraries(lstopo-no-graphics PRIVATE hwloc)
 
 #    add_executable(lstopo
 #            ${LSTOPO_COMMON_SOURCES}
