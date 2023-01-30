@@ -149,6 +149,7 @@ if (APPLE)
     target_sources(hwloc PRIVATE
             ${TOPDIR}/hwloc/topology-darwin.c
             )
+    target_link_libraries(hwloc PUBLIC "-framework CoreFoundation" "-framework IOKit")
 endif ()
 
 # Tools under utils/hwloc
@@ -168,7 +169,7 @@ if(NOT HWLOC_SKIP_TOOLS)
     foreach(tool IN ITEMS ${TOOLS})
         add_executable(${tool}
                 ${TOPDIR}/utils/hwloc/${tool}.c)
-        target_link_libraries(${tool} PRIVATE hwloc "-framework CoreFoundation" "-framework IOKit")
+        target_link_libraries(${tool} hwloc)
     endforeach(tool)
 
 endif()
