@@ -1,5 +1,5 @@
 /*
- * Copyright © 2012-2021 Inria.  All rights reserved.
+ * Copyright © 2012-2023 Inria.  All rights reserved.
  * Copyright (c) 2020, Advanced Micro Devices, Inc. All rights reserved.
  * Written by Advanced Micro Devices,
  * See COPYING in top-level directory.
@@ -55,6 +55,9 @@ extern "C" {
  *
  * This function is currently only implemented in a meaningful way for
  * Linux; other systems will simply get a full cpuset.
+ *
+ * \return 0 on success.
+ * \return -1 on error, for instance if device information could not be found.
  */
 static __hwloc_inline int
 hwloc_rsmi_get_device_cpuset(hwloc_topology_t topology __hwloc_attribute_unused,
@@ -113,7 +116,7 @@ hwloc_rsmi_get_device_osdev_by_index(hwloc_topology_t topology, uint32_t dv_ind)
 {
   hwloc_obj_t osdev = NULL;
   while ((osdev = hwloc_get_next_osdev(topology, osdev)) != NULL) {
-    if (HWLOC_OBJ_OSDEV_GPU == osdev->attr->osdev.type
+    if ((osdev->attr->osdev.type & (HWLOC_OBJ_OSDEV_GPU|HWLOC_OBJ_OSDEV_COPROC)) /* assume future RSMI devices will be at least GPU or COPROC */
       && osdev->name
       && !strncmp("rsmi", osdev->name, 4)
       && atoi(osdev->name + 4) == (int) dv_ind)

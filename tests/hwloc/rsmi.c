@@ -1,5 +1,5 @@
 /*
- * Copyright © 2012-2020 Inria.  All rights reserved.
+ * Copyright © 2012-2023 Inria.  All rights reserved.
  * Copyright (c) 2020, Advanced Micro Devices, Inc. All rights reserved.
  * Written by Advanced Micro Devices,
  * See COPYING in top-level directory.
@@ -14,11 +14,23 @@
 
 /* check the RSMI helpers */
 
+static int check_rsmi_backend(hwloc_topology_t topology)
+{
+  struct hwloc_infos_s *infos = hwloc_topology_get_infos(topology);
+  unsigned i;
+  for(i=0; i<infos->count; i++)
+    if (!strcmp(infos->array[i].name, "Backend")
+        && !strcmp(infos->array[i].value, "RSMI"))
+      return 1;
+  return 0;
+}
+
 int main(void)
 {
   hwloc_topology_t topology;
   rsmi_status_t ret;
   unsigned count, i;
+  int has_rsmi_backend;
   int err = 0;
 
   rsmi_init(0);
@@ -32,13 +44,15 @@ int main(void)
     } else {
       fprintf(stderr, "No GPU available\n");
       return 0;
-    }	    
+    }
   }
   printf("rsmi_num_monitor_devices found %u devices\n", count);
 
   hwloc_topology_init(&topology);
   hwloc_topology_set_io_types_filter(topology, HWLOC_TYPE_FILTER_KEEP_IMPORTANT);
   hwloc_topology_load(topology);
+
+  has_rsmi_backend = check_rsmi_backend(topology);
 
   for (i=0; i<count; i++) {
     hwloc_bitmap_t set;
@@ -57,11 +71,9 @@ int main(void)
     assert(!err);
     assert(atoi(osdev->name+4) == (int) i);
 
-    value = hwloc_obj_get_info_by_name(osdev, "Backend");
-    err = strcmp(value, "RSMI");
-    assert(!err);
+    assert(has_rsmi_backend);
 
-    assert(osdev->attr->osdev.type == HWLOC_OBJ_OSDEV_GPU);
+    assert(osdev->attr->osdev.type == (HWLOC_OBJ_OSDEV_COPROC|HWLOC_OBJ_OSDEV_GPU));
 
     value = hwloc_obj_get_info_by_name(osdev, "GPUModel");
     printf("found OSDev model %s\n", value);

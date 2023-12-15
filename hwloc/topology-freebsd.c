@@ -1,6 +1,6 @@
 /*
  * Copyright © 2009 CNRS
- * Copyright © 2009-2022 Inria.  All rights reserved.
+ * Copyright © 2009-2023 Inria.  All rights reserved.
  * Copyright © 2009-2010, 2012, 2020 Université Bordeaux
  * Copyright © 2011 Cisco Systems, Inc.  All rights reserved.
  * See COPYING in top-level directory.
@@ -35,6 +35,10 @@
 #include "hwloc.h"
 #include "private/private.h"
 #include "private/debug.h"
+
+struct hwloc_freebsd_backend_data_s {
+  int need_global_infos;
+};
 
 #if defined(HAVE_SYS_CPUSET_H) && defined(HAVE_CPUSET_SETAFFINITY)
 static void
@@ -525,6 +529,7 @@ hwloc_look_freebsd(struct hwloc_backend *backend, struct hwloc_disc_status *dsta
    * we may still force use this backend when debugging with !thissystem.
    */
   struct hwloc_topology *topology = backend->topology;
+  struct hwloc_freebsd_backend_data_s *data = HWLOC_BACKEND_PRIVATE_DATA(backend);
 
   if (dstatus->phase == HWLOC_DISC_PHASE_CPU) {
     if (!topology->levels[0][0]->cpuset) {
@@ -545,8 +550,12 @@ hwloc_look_freebsd(struct hwloc_backend *backend, struct hwloc_disc_status *dsta
       memsize = hwloc_fallback_memsize();
       if (memsize > 0)
         topology->machine_memory.local_memory = memsize;
-      hwloc_obj_add_info(topology->levels[0][0], "Backend", "FreeBSD");
-      hwloc_add_uname_info(topology, NULL);
+  }
+
+  if (data->need_global_infos) {
+    hwloc__add_info(&topology->infos, "Backend", "FreeBSD");
+    hwloc_add_uname_info(topology, NULL);
+    data->need_global_infos = 0;
   }
   return 0;
 }
@@ -595,9 +604,15 @@ hwloc_freebsd_component_instantiate(struct hwloc_topology *topology,
 				    const void *_data3 __hwloc_attribute_unused)
 {
   struct hwloc_backend *backend;
-  backend = hwloc_backend_alloc(topology, component);
+  struct hwloc_freebsd_backend_data_s *data;
+
+  backend = hwloc_backend_alloc(topology, component, sizeof(struct hwloc_freebsd_backend_data_s));
   if (!backend)
     return NULL;
+
+  data = HWLOC_BACKEND_PRIVATE_DATA(backend);
+  data->need_global_infos = 1;
+
   backend->discover = hwloc_look_freebsd;
   return backend;
 }

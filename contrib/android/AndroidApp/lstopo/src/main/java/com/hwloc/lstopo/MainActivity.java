@@ -254,7 +254,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
                         startWithInput(lstopo, 2, txtFile.getAbsolutePath(), topology, options);
                     setMode("txt");
                     String lstopoText = readFile(txtFile);
-                    lstopo.text(lstopoText, 0, 0, 0, 0, -1);
+                    lstopo.text(lstopoText, 0, 0, 0, 0, 0, -1);
                     break;
                 } catch (IOException e) {
                     e.printStackTrace();
@@ -275,7 +275,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
                         startWithInput(lstopo, 3, xmlFile.getAbsolutePath(), topology, options);
                     setMode("xml");
                     String lstopoText = readFile(xmlFile);
-                    lstopo.text(lstopoText, 0, 0, 0, 0, -1);
+                    lstopo.text(lstopoText, 0, 0, 0, 0, 0, -1);
                     break;
                 } catch (IOException e) {
                     e.printStackTrace();
@@ -289,9 +289,12 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
                 menuItems.setDrawFormat();
                 mode = "draw";
                 break;
-            case R.id.activity_main_drawer_API:
-                menuItems.setDrawFormat();
-                downloadTopology();
+            case R.id.activity_main_drawer_database:
+                /* menuItems.setDrawFormat();
+                downloadTopology(); */
+                Uri uriDatabase = Uri.parse("https://hwloc.gitlabpages.inria.fr/xmls/");
+                Intent intentDatabase = new Intent(Intent.ACTION_VIEW, uriDatabase);
+                startActivity(intentDatabase);
                 break;
             case R.id.activity_main_drawer_LocalXML:
                 file_picker();

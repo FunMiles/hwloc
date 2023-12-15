@@ -1,6 +1,6 @@
 /*
  * Copyright © 2009 CNRS
- * Copyright © 2009-2022 Inria.  All rights reserved.
+ * Copyright © 2009-2023 Inria.  All rights reserved.
  * Copyright © 2009-2012, 2020 Université Bordeaux
  * Copyright © 2009-2011 Cisco Systems, Inc.  All rights reserved.
  * Copyright © 2022 IBM Corporation.  All rights reserved.
@@ -146,21 +146,24 @@ report_insert_error_format_obj(char *buf, size_t buflen, hwloc_obj_t obj)
   char typestr[64];
   char *cpusetstr;
   char *nodesetstr = NULL;
+  char indexstr[64] = "";
+  char groupstr[64] = "";
 
   hwloc_obj_type_snprintf(typestr, sizeof(typestr), obj, 0);
   hwloc_bitmap_asprintf(&cpusetstr, obj->cpuset);
+  if (obj->os_index != HWLOC_UNKNOWN_INDEX)
+    snprintf(indexstr, sizeof(indexstr), "P#%u ", obj->os_index);
+  if (obj->type == HWLOC_OBJ_GROUP)
+    snprintf(groupstr, sizeof(groupstr), "groupkind %u-%u ", obj->attr->group.kind, obj->attr->group.subkind);
   if (obj->nodeset) /* may be missing during insert */
     hwloc_bitmap_asprintf(&nodesetstr, obj->nodeset);
-  if (obj->os_index != HWLOC_UNKNOWN_INDEX)
-    snprintf(buf, buflen, "%s (P#%u cpuset %s%s%s)",
-             typestr, obj->os_index, cpusetstr,
-             nodesetstr ? " nodeset " : "",
-             nodesetstr ? nodesetstr : "");
-  else
-    snprintf(buf, buflen, "%s (cpuset %s%s%s)",
-             typestr, cpusetstr,
-             nodesetstr ? " nodeset " : "",
-             nodesetstr ? nodesetstr : "");
+  snprintf(buf, buflen, "%s (%s%s%s%s%scpuset %s%s%s)",
+           typestr,
+           indexstr,
+           obj->subtype ? "subtype " : "", obj->subtype ? obj->subtype : "", obj->subtype ? " " : "",
+           groupstr,
+           cpusetstr,
+           nodesetstr ? " nodeset " : "", nodesetstr ? nodesetstr : "");
   free(cpusetstr);
   free(nodesetstr);
 }
@@ -178,8 +181,9 @@ static void report_insert_error(hwloc_obj_t new, hwloc_obj_t old, const char *ms
     fprintf(stderr, "****************************************************************************\n");
     fprintf(stderr, "* hwloc %s received invalid information from the operating system.\n", HWLOC_VERSION);
     fprintf(stderr, "*\n");
-    fprintf(stderr, "* Failed with: %s\n", msg);
-    fprintf(stderr, "* while inserting %s at %s\n", newstr, oldstr);
+    fprintf(stderr, "* Failed with error: %s\n", msg);
+    fprintf(stderr, "* while inserting %s\n", newstr);
+    fprintf(stderr, "* at %s\n", oldstr);
     fprintf(stderr, "* coming from: %s\n", reason);
     fprintf(stderr, "*\n");
     fprintf(stderr, "* The following FAQ entry in the hwloc documentation may help:\n");
@@ -461,142 +465,246 @@ hwloc_debug_print_objects(int indent __hwloc_attribute_unused, hwloc_obj_t obj)
 #define hwloc_debug_print_objects(indent, obj) do { /* nothing */ } while (0)
 #endif /* !HWLOC_DEBUG */
 
-void hwloc__free_infos(struct hwloc_info_s *infos, unsigned count)
+struct hwloc_infos_s * hwloc_topology_get_infos(hwloc_topology_t topology)
 {
-  unsigned i;
-  for(i=0; i<count; i++) {
-    free(infos[i].name);
-    free(infos[i].value);
-  }
-  free(infos);
+  return &topology->infos;
 }
 
-int hwloc__add_info(struct hwloc_info_s **infosp, unsigned *countp, const char *name, const char *value)
+void hwloc__free_infos(struct hwloc_infos_s *infos)
 {
-  unsigned count = *countp;
-  struct hwloc_info_s *infos = *infosp;
+  unsigned i;
+  for(i=0; i<infos->count; i++) {
+    free(infos->array[i].name);
+    free(infos->array[i].value);
+  }
+  free(infos->array);
+}
+
+static int hwloc__realloc_infos(struct hwloc_infos_s *infos, unsigned nr)
+{
+  struct hwloc_info_s *tmparray;
+  unsigned alloccount;
+
+  if (infos->allocated > infos->count + nr)
+    return 0;
+
 #define OBJECT_INFO_ALLOC 8
   /* nothing allocated initially, (re-)allocate by multiple of 8 */
-  unsigned alloccount = (count + 1 + (OBJECT_INFO_ALLOC-1)) & ~(OBJECT_INFO_ALLOC-1);
-  if (count != alloccount) {
-    struct hwloc_info_s *tmpinfos = realloc(infos, alloccount*sizeof(*infos));
-    if (!tmpinfos)
-      /* failed to allocate, ignore this info */
-      goto out_with_array;
-    *infosp = infos = tmpinfos;
-  }
-  infos[count].name = strdup(name);
-  if (!infos[count].name)
-    goto out_with_array;
-  infos[count].value = strdup(value);
-  if (!infos[count].value)
-    goto out_with_name;
-  *countp = count+1;
+  alloccount = (infos->count + nr + (OBJECT_INFO_ALLOC-1)) & ~(OBJECT_INFO_ALLOC-1);
+  tmparray = realloc(infos->array, alloccount*sizeof(*tmparray));
+  if (!tmparray)
+    return -1;
+
+  infos->array = tmparray;
+  infos->allocated = alloccount;
   return 0;
+}
+
+int hwloc__add_info(struct hwloc_infos_s *infos, const char *name, const char *value)
+{
+  unsigned count;
+  struct hwloc_info_s *array;
+
+  if (!name || !value) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  if (hwloc__realloc_infos(infos, 1) < 0)
+    return -1;
+
+  count = infos->count;
+  array = infos->array;
+
+  array[count].name = strdup(name);
+  if (!array[count].name)
+    goto out_with_array;
+  array[count].value = strdup(value);
+  if (!array[count].value)
+    goto out_with_name;
+  infos->count = count+1;
+  return 1;
 
  out_with_name:
-  free(infos[count].name);
+  free(array[count].name);
  out_with_array:
   /* don't bother reducing the array */
   return -1;
 }
 
-int hwloc__add_info_nodup(struct hwloc_info_s **infosp, unsigned *countp,
-			  const char *name, const char *value,
-			  int replace)
+static int hwloc__add_info_unique(struct hwloc_infos_s *infos, const char *name, const char *value)
 {
-  struct hwloc_info_s *infos = *infosp;
-  unsigned count = *countp;
-  unsigned i;
-  for(i=0; i<count; i++) {
-    if (!strcmp(infos[i].name, name)) {
-      if (replace) {
-	char *new = strdup(value);
-	if (!new)
-	  return -1;
-	free(infos[i].value);
-	infos[i].value = new;
-      }
-      return 0;
-    }
+  struct hwloc_info_s *array = infos->array;
+  unsigned i, count = infos->count;
+
+  if (!name || !value) {
+    errno = EINVAL;
+    return -1;
   }
-  return hwloc__add_info(infosp, countp, name, value);
+
+  for(i=0; i<count; i++)
+    if (!strcmp(array[i].name, name) && !strcmp(array[i].value, value))
+      return 0;
+
+  return hwloc__add_info(infos, name, value);
 }
 
-int hwloc__move_infos(struct hwloc_info_s **dst_infosp, unsigned *dst_countp,
-		      struct hwloc_info_s **src_infosp, unsigned *src_countp)
+int hwloc__replace_infos(struct hwloc_infos_s *infos,
+                         const char *name, const char *value)
 {
-  unsigned dst_count = *dst_countp;
-  struct hwloc_info_s *dst_infos = *dst_infosp;
-  unsigned src_count = *src_countp;
-  struct hwloc_info_s *src_infos = *src_infosp;
+  struct hwloc_info_s *array = infos->array;
+  unsigned count = infos->count;
   unsigned i;
-#define OBJECT_INFO_ALLOC 8
-  /* nothing allocated initially, (re-)allocate by multiple of 8 */
-  unsigned alloccount = (dst_count + src_count + (OBJECT_INFO_ALLOC-1)) & ~(OBJECT_INFO_ALLOC-1);
-  if (dst_count != alloccount) {
-    struct hwloc_info_s *tmp_infos = realloc(dst_infos, alloccount*sizeof(*dst_infos));
-    if (!tmp_infos)
-      /* Failed to realloc, ignore the appended infos */
-      goto drop;
-    dst_infos = tmp_infos;
+  int found = 0;
+
+  if (!name || !value) {
+    errno = EINVAL;
+    return -1;
   }
+
+  for(i=0; i<count; i++) {
+    if (!strcmp(array[i].name, name)) {
+      if (!found) {
+        /* first match, replace */
+        char *new = strdup(value);
+        if (!new)
+	  return -1;
+	free(array[i].value);
+	array[i].value = new;
+      } else {
+        /* non-first match, remove */
+        free(array[i].name);
+        free(array[i].value);
+      }
+      found++;
+    } else if (found > 1) {
+      /* non-match, move left by found-1 */
+      array[i-(found-1)].name = array[i].name;
+      array[i-(found-1)].value = array[i].value;
+    }
+  }
+  if (found) {
+    if (found > 1)
+      infos->count -= found-1;
+    return 1+found;
+  } else {
+    /* no match, just add */
+    return hwloc__add_info(infos, name, value);
+  }
+}
+
+static int hwloc__remove_infos(struct hwloc_infos_s *infos,
+                               const char *name, const char *value)
+{
+  struct hwloc_info_s *array = infos->array;
+  unsigned count = infos->count;
+  unsigned i;
+  int found = 0;
+
+  for(i=0; i<count; i++) {
+    if ((!name || !strcmp(array[i].name, name))
+        && (!value || !strcmp(array[i].value, value))) {
+      /* match, remove */
+      free(array[i].name);
+      free(array[i].value);
+      found++;
+    } else {
+      /* non-match, move left by found */
+      array[i-found].name = array[i].name;
+      array[i-found].value = array[i].value;
+    }
+  }
+  infos->count -= found;
+  return found;
+}
+
+int hwloc_modify_infos(struct hwloc_infos_s *infos, unsigned long op, const char *name, const char *value)
+{
+  switch (op) {
+  case HWLOC_MODIFY_INFOS_OP_ADD:
+    return hwloc__add_info(infos, name, value);
+  case HWLOC_MODIFY_INFOS_OP_ADD_UNIQUE:
+    return hwloc__add_info_unique(infos, name, value);
+  case HWLOC_MODIFY_INFOS_OP_REPLACE:
+    return hwloc__replace_infos(infos, name, value);
+  case HWLOC_MODIFY_INFOS_OP_REMOVE:
+    return hwloc__remove_infos(infos, name, value);
+  default:
+    errno = EINVAL;
+    return -1;
+  }
+}
+
+int hwloc__move_infos(struct hwloc_infos_s *dst_infos,
+		      struct hwloc_infos_s *src_infos)
+{
+  struct hwloc_info_s *dst_array, *src_array;
+  unsigned dst_count, src_count;
+  unsigned i;
+
+  src_count = src_infos->count;
+  src_array = src_infos->array;
+
+  if (hwloc__realloc_infos(dst_infos, src_count) < 0)
+    goto drop;
+
+  dst_count = dst_infos->count;
+  dst_array = dst_infos->array;
+
   for(i=0; i<src_count; i++, dst_count++) {
-    dst_infos[dst_count].name = src_infos[i].name;
-    dst_infos[dst_count].value = src_infos[i].value;
+    dst_array[dst_count].name = src_array[i].name;
+    dst_array[dst_count].value = src_array[i].value;
   }
-  *dst_infosp = dst_infos;
-  *dst_countp = dst_count;
-  free(src_infos);
-  *src_infosp = NULL;
-  *src_countp = 0;
+  dst_infos->array = dst_array;
+  dst_infos->count = dst_count;
+  free(src_array);
+  src_infos->array = NULL;
+  src_infos->count = 0;
   return 0;
 
  drop:
   /* drop src infos, don't modify dst_infos at all */
   for(i=0; i<src_count; i++) {
-    free(src_infos[i].name);
-    free(src_infos[i].value);
+    free(src_array[i].name);
+    free(src_array[i].value);
   }
-  free(src_infos);
-  *src_infosp = NULL;
-  *src_countp = 0;
+  free(src_array);
+  src_infos->array = NULL;
+  src_infos->count = 0;
+  src_infos->allocated = 0;
   return -1;
-}
-
-int hwloc_obj_add_info(hwloc_obj_t obj, const char *name, const char *value)
-{
-  return hwloc__add_info(&obj->infos, &obj->infos_count, name, value);
 }
 
 /* This function may be called with topology->tma set, it cannot free() or realloc() */
 int hwloc__tma_dup_infos(struct hwloc_tma *tma,
-                         struct hwloc_info_s **newip, unsigned *newcp,
-                         struct hwloc_info_s *oldi, unsigned oldc)
+                         struct hwloc_infos_s *newi,
+                         struct hwloc_infos_s *oldi)
 {
-  struct hwloc_info_s *newi;
+  struct hwloc_info_s *newa;
   unsigned i, j;
-  newi = hwloc_tma_calloc(tma, oldc * sizeof(*newi));
-  if (!newi)
+  newa = hwloc_tma_calloc(tma, oldi->allocated * sizeof(*newa));
+  if (!newa)
     return -1;
-  for(i=0; i<oldc; i++) {
-    newi[i].name = hwloc_tma_strdup(tma, oldi[i].name);
-    newi[i].value = hwloc_tma_strdup(tma, oldi[i].value);
-    if (!newi[i].name || !newi[i].value)
+  for(i=0; i<oldi->count; i++) {
+    newa[i].name = hwloc_tma_strdup(tma, oldi->array[i].name);
+    newa[i].value = hwloc_tma_strdup(tma, oldi->array[i].value);
+    if (!newa[i].name || !newa[i].value)
       goto failed;
   }
-  *newip = newi;
-  *newcp = oldc;
+  newi->array = newa;
+  newi->count = oldi->count;
+  newi->allocated = oldi->allocated;
   return 0;
 
  failed:
   assert(!tma || !tma->dontfree); /* this tma cannot fail to allocate */
   for(j=0; j<=i; j++) {
-    free(newi[i].name);
-    free(newi[i].value);
+    free(newa[i].name);
+    free(newa[i].value);
   }
-  free(newi);
-  *newip = NULL;
+  newi->array = NULL;
+  newi->count = 0;
+  newi->allocated = 0;
   return -1;
 }
 
@@ -610,7 +718,7 @@ hwloc__free_object_contents(hwloc_obj_t obj)
   default:
     break;
   }
-  hwloc__free_infos(obj->infos, obj->infos_count);
+  hwloc__free_infos(&obj->infos);
   free(obj->attr);
   free(obj->children);
   free(obj->subtype);
@@ -679,7 +787,8 @@ unlink_and_free_object_and_children(hwloc_obj_t *pobj)
 void
 hwloc_free_object_and_children(hwloc_obj_t obj)
 {
-  unlink_and_free_object_and_children(&obj);
+  if (obj)
+    unlink_and_free_object_and_children(&obj);
 }
 
 /* Free an object, its next siblings and their children without unlinking from parent.
@@ -915,7 +1024,7 @@ hwloc__duplicate_object(struct hwloc_topology *newtopology,
   newobj->nodeset = hwloc_bitmap_tma_dup(tma, src->nodeset);
   newobj->complete_nodeset = hwloc_bitmap_tma_dup(tma, src->complete_nodeset);
 
-  hwloc__tma_dup_infos(tma, &newobj->infos, &newobj->infos_count, src->infos, src->infos_count);
+  hwloc__tma_dup_infos(tma, &newobj->infos, &src->infos);
 
   /* find our level */
   if (src->depth < 0) {
@@ -1106,6 +1215,8 @@ hwloc__topology_dup(hwloc_topology_t *newp,
   err = hwloc__duplicate_object(new, NULL, newroot, oldroot);
   if (err < 0)
     goto out_with_topology;
+
+  hwloc__tma_dup_infos(tma, &new->infos, &old->infos);
 
   err = hwloc_internal_distances_dup(new, old);
   if (err < 0)
@@ -1357,10 +1468,10 @@ merge_insert_equal(hwloc_obj_t new, hwloc_obj_t old)
   if (old->os_index == HWLOC_UNKNOWN_INDEX)
     old->os_index = new->os_index;
 
-  if (new->infos_count) {
+  if (new->infos.count) {
     /* FIXME: dedup */
-    hwloc__move_infos(&old->infos, &old->infos_count,
-		      &new->infos, &new->infos_count);
+    hwloc__move_infos(&old->infos,
+		      &new->infos);
   }
 
   if (new->name && !old->name) {
@@ -1924,6 +2035,22 @@ hwloc_topology_alloc_group_object(struct hwloc_topology *topology)
   return hwloc_alloc_setup_object(topology, HWLOC_OBJ_GROUP, HWLOC_UNKNOWN_INDEX);
 }
 
+int
+hwloc_topology_free_group_object(struct hwloc_topology *topology, hwloc_obj_t obj)
+{
+  if (!(topology->state & HWLOC_TOPOLOGY_STATE_IS_LOADED)) {
+    /* this could actually work when IS_LOADING, see insert() below */
+    errno = EINVAL;
+    return -1;
+  }
+  if (topology->adopted_shmem_addr) {
+    errno = EPERM;
+    return -1;
+  }
+  hwloc_free_unlinked_object(obj);
+  return 0;
+}
+
 static void hwloc_propagate_symmetric_subtree(hwloc_topology_t topology, hwloc_obj_t root);
 static void propagate_total_memory(hwloc_obj_t obj);
 static void hwloc_set_group_depth(hwloc_topology_t topology);
@@ -1934,7 +2061,7 @@ static int hwloc_connect_special_levels(hwloc_topology_t topology);
 hwloc_obj_t
 hwloc_topology_insert_group_object(struct hwloc_topology *topology, hwloc_obj_t obj)
 {
-  hwloc_obj_t res, root;
+  hwloc_obj_t res, root, child;
   int cmp;
 
   if (!(topology->state & HWLOC_TOPOLOGY_STATE_IS_LOADED)) {
@@ -1944,6 +2071,7 @@ hwloc_topology_insert_group_object(struct hwloc_topology *topology, hwloc_obj_t 
     return NULL;
   }
   if (topology->adopted_shmem_addr) {
+    hwloc_free_unlinked_object(obj);
     errno = EPERM;
     return NULL;
   }
@@ -1997,6 +2125,7 @@ hwloc_topology_insert_group_object(struct hwloc_topology *topology, hwloc_obj_t 
     res = hwloc__insert_object_by_cpuset(topology, NULL, obj, NULL /* do not show errors on stdout */);
   } else {
     /* just merge root */
+    hwloc_free_unlinked_object(obj);
     res = root;
   }
 
@@ -2022,6 +2151,13 @@ hwloc_topology_insert_group_object(struct hwloc_topology *topology, hwloc_obj_t 
   hwloc_obj_add_children_sets(res);
   if (hwloc_topology_reconnect(topology, 0) < 0)
     return NULL;
+
+  /* Compute group total_memory. */
+  res->total_memory = 0;
+  for_each_child(child, res)
+    res->total_memory += child->total_memory;
+  for_each_memory_child(child, res)
+    res->total_memory += child->total_memory;
 
   hwloc_propagate_symmetric_subtree(topology, topology->levels[0][0]);
   hwloc_set_group_depth(topology);
@@ -2253,11 +2389,13 @@ fixup_sets(hwloc_obj_t obj)
 int
 hwloc_obj_add_other_obj_sets(hwloc_obj_t dst, hwloc_obj_t src)
 {
-#define ADD_OTHER_OBJ_SET(_dst, _src, _set)			\
-  if ((_src)->_set) {						\
-    if (!(_dst)->_set)						\
-      (_dst)->_set = hwloc_bitmap_alloc();			\
-    hwloc_bitmap_or((_dst)->_set, (_dst)->_set, (_src)->_set);	\
+#define ADD_OTHER_OBJ_SET(_dst, _src, _set)					\
+  if ((_src)->_set) {								\
+    if (!(_dst)->_set)								\
+      (_dst)->_set = hwloc_bitmap_alloc();					\
+    if (!(_dst)->_set								\
+        || hwloc_bitmap_or((_dst)->_set, (_dst)->_set, (_src)->_set) < 0)	\
+      return -1;								\
   }
   ADD_OTHER_OBJ_SET(dst, src, cpuset);
   ADD_OTHER_OBJ_SET(dst, src, complete_cpuset);
@@ -3619,11 +3757,11 @@ hwloc_discover(struct hwloc_topology *topology,
       && !getenv("HWLOC_DONT_ADD_VERSION_INFO")) {
     char *value;
     /* add a hwlocVersion */
-    hwloc_obj_add_info(topology->levels[0][0], "hwlocVersion", HWLOC_VERSION);
+    hwloc__add_info(&topology->infos, "hwlocVersion", HWLOC_VERSION);
     /* add a ProcessName */
     value = hwloc_progname(topology);
     if (value) {
-      hwloc_obj_add_info(topology->levels[0][0], "ProcessName", value);
+      hwloc__add_info(&topology->infos, "ProcessName", value);
       free(value);
     }
   }
@@ -3722,12 +3860,17 @@ hwloc__topology_init (struct hwloc_topology **topologyp,
   topology->support.membind = hwloc_tma_malloc(tma, sizeof(*topology->support.membind));
   topology->support.misc = hwloc_tma_malloc(tma, sizeof(*topology->support.misc));
 
+  topology->infos.count = 0;
+  topology->infos.allocated = 0;
+  topology->infos.array = NULL;
+
   topology->nb_levels_allocated = nblevels; /* enough for default 10 levels = Mach+Pack+Die+NUMA+L3+L2+L1d+L1i+Co+PU */
   topology->levels = hwloc_tma_calloc(tma, topology->nb_levels_allocated * sizeof(*topology->levels));
   topology->level_nbobjects = hwloc_tma_calloc(tma, topology->nb_levels_allocated * sizeof(*topology->level_nbobjects));
 
   hwloc__topology_filter_init(topology);
 
+  /* always initialize since we don't know flags to disable those yet */
   hwloc_internal_distances_init(topology);
   hwloc_internal_memattrs_init(topology);
   hwloc_internal_cpukinds_init(topology);
@@ -3940,8 +4083,12 @@ int
 hwloc_topology_set_cache_types_filter(hwloc_topology_t topology, enum hwloc_type_filter_e filter)
 {
   unsigned i;
-  for(i=HWLOC_OBJ_L1CACHE; i<HWLOC_OBJ_L3ICACHE; i++)
-    hwloc_topology_set_type_filter(topology, (hwloc_obj_type_t) i, filter);
+  if (!(topology->state & HWLOC_TOPOLOGY_STATE_IS_INIT)) {
+    errno = EBUSY;
+    return -1;
+  }
+  for(i=HWLOC_OBJ_L1CACHE; i<=HWLOC_OBJ_L3ICACHE; i++)
+    hwloc__topology_set_type_filter(topology, (hwloc_obj_type_t) i, filter);
   return 0;
 }
 
@@ -3949,17 +4096,25 @@ int
 hwloc_topology_set_icache_types_filter(hwloc_topology_t topology, enum hwloc_type_filter_e filter)
 {
   unsigned i;
-  for(i=HWLOC_OBJ_L1ICACHE; i<HWLOC_OBJ_L3ICACHE; i++)
-    hwloc_topology_set_type_filter(topology, (hwloc_obj_type_t) i, filter);
+  if (!(topology->state & HWLOC_TOPOLOGY_STATE_IS_INIT)) {
+    errno = EBUSY;
+    return -1;
+  }
+  for(i=HWLOC_OBJ_L1ICACHE; i<=HWLOC_OBJ_L3ICACHE; i++)
+    hwloc__topology_set_type_filter(topology, (hwloc_obj_type_t) i, filter);
   return 0;
 }
 
 int
 hwloc_topology_set_io_types_filter(hwloc_topology_t topology, enum hwloc_type_filter_e filter)
 {
-  hwloc_topology_set_type_filter(topology, HWLOC_OBJ_BRIDGE, filter);
-  hwloc_topology_set_type_filter(topology, HWLOC_OBJ_PCI_DEVICE, filter);
-  hwloc_topology_set_type_filter(topology, HWLOC_OBJ_OS_DEVICE, filter);
+  if (!(topology->state & HWLOC_TOPOLOGY_STATE_IS_INIT)) {
+    errno = EBUSY;
+    return -1;
+  }
+  hwloc__topology_set_type_filter(topology, HWLOC_OBJ_BRIDGE, filter);
+  hwloc__topology_set_type_filter(topology, HWLOC_OBJ_PCI_DEVICE, filter);
+  hwloc__topology_set_type_filter(topology, HWLOC_OBJ_OS_DEVICE, filter);
   return 0;
 }
 
@@ -3980,9 +4135,12 @@ hwloc_topology_clear (struct hwloc_topology *topology)
 {
   /* no need to set to NULL after free() since callers will call setup_defaults() or just destroy the rest of the topology */
   unsigned l;
+
+  /* always destroy cpukinds/distances/memattrs since there are always initialized during init() */
   hwloc_internal_cpukinds_destroy(topology);
   hwloc_internal_distances_destroy(topology);
   hwloc_internal_memattrs_destroy(topology);
+
   hwloc_free_object_and_children(topology->levels[0][0]);
   hwloc_bitmap_free(topology->allowed_cpuset);
   hwloc_bitmap_free(topology->allowed_nodeset);
@@ -4007,6 +4165,8 @@ hwloc_topology_destroy (struct hwloc_topology *topology)
 
   hwloc_topology_clear(topology);
 
+  hwloc__free_infos(&topology->infos);
+
   free(topology->levels);
   free(topology->level_nbobjects);
 
@@ -4022,6 +4182,7 @@ hwloc_topology_load (struct hwloc_topology *topology)
 {
   struct hwloc_disc_status dstatus;
   const char *env;
+  unsigned i;
   int err;
 
   if (!(topology->state & HWLOC_TOPOLOGY_STATE_IS_INIT)) {
@@ -4032,8 +4193,18 @@ hwloc_topology_load (struct hwloc_topology *topology)
   topology->state |= HWLOC_TOPOLOGY_STATE_IS_LOADING;
 
   /* initialize envvar-related things */
-  hwloc_internal_distances_prepare(topology);
-  hwloc_internal_memattrs_prepare(topology);
+  if (!(topology->flags & HWLOC_TOPOLOGY_FLAG_NO_DISTANCES))
+    hwloc_internal_distances_prepare(topology);
+  if (!(topology->flags & HWLOC_TOPOLOGY_FLAG_NO_MEMATTRS))
+    hwloc_internal_memattrs_prepare(topology);
+
+  /* check if any cpu cache filter is not NONE */
+  topology->want_some_cpu_caches = 0;
+  for(i=HWLOC_OBJ_L1CACHE; i<=HWLOC_OBJ_L3ICACHE; i++)
+    if (topology->type_filter[i] != HWLOC_TYPE_FILTER_KEEP_NONE) {
+      topology->want_some_cpu_caches = 1;
+      break;
+    }
 
   if (getenv("HWLOC_XML_USERDATA_NOT_DECODED"))
     topology->userdata_not_decoded = 1;
@@ -4110,23 +4281,32 @@ hwloc_topology_load (struct hwloc_topology *topology)
 #endif
     hwloc_topology_check(topology);
 
-  /* Rank cpukinds */
-  hwloc_internal_cpukinds_rank(topology);
+  if (!(topology->flags & HWLOC_TOPOLOGY_FLAG_NO_CPUKINDS)) {
+    /* Rank cpukinds */
+    hwloc_internal_cpukinds_rank(topology);
+  }
 
-  /* Mark distances objs arrays as invalid since we may have removed objects
-   * from the topology after adding the distances (remove_empty, etc).
-   * It would be hard to actually verify whether it's needed.
-   */
-  hwloc_internal_distances_invalidate_cached_objs(topology);
-  /* And refresh distances so that multithreaded concurrent distances_get()
-   * don't refresh() concurrently (disallowed).
-   */
-  hwloc_internal_distances_refresh(topology);
+  if (!(topology->flags & HWLOC_TOPOLOGY_FLAG_NO_DISTANCES)) {
+    /* Mark distances objs arrays as invalid since we may have removed objects
+     * from the topology after adding the distances (remove_empty, etc).
+     * It would be hard to actually verify whether it's needed.
+     */
+    hwloc_internal_distances_invalidate_cached_objs(topology);
+    /* And refresh distances so that multithreaded concurrent distances_get()
+     * don't refresh() concurrently (disallowed).
+     */
+    hwloc_internal_distances_refresh(topology);
+  }
 
-  /* Same for memattrs */
-  hwloc_internal_memattrs_need_refresh(topology);
-  hwloc_internal_memattrs_refresh(topology);
-  hwloc_internal_memattrs_guess_memory_tiers(topology);
+  if (!(topology->flags & HWLOC_TOPOLOGY_FLAG_NO_MEMATTRS)) {
+    int force_memtiers = (getenv("HWLOC_MEMTIERS_REFRESH") != NULL);
+    /* Same for memattrs */
+    hwloc_internal_memattrs_need_refresh(topology);
+    hwloc_internal_memattrs_refresh(topology);
+    /* update memtiers unless XML */
+    if (force_memtiers || strcmp(topology->backends->component->name, "xml"))
+      hwloc_internal_memattrs_guess_memory_tiers(topology, force_memtiers);
+  }
 
   topology->state &= ~HWLOC_TOPOLOGY_STATE_IS_LOADING;
   topology->state |= HWLOC_TOPOLOGY_STATE_IS_LOADED;
@@ -4186,20 +4366,11 @@ restrict_object_by_cpuset(hwloc_topology_t topology, unsigned long flags, hwloc_
     hwloc_bitmap_andnot(obj->cpuset, obj->cpuset, droppedcpuset);
     hwloc_bitmap_andnot(obj->complete_cpuset, obj->complete_cpuset, droppedcpuset);
     modified = 1;
-  } else {
-    if ((flags & HWLOC_RESTRICT_FLAG_REMOVE_CPULESS)
-	&& hwloc_bitmap_iszero(obj->complete_cpuset)) {
-      /* we're empty, there's a NUMAnode below us, it'll be removed this time */
-      modified = 1;
-    }
-    /* nodeset cannot intersect unless cpuset intersects or is empty */
-    if (droppednodeset)
-      assert(!hwloc_bitmap_intersects(obj->complete_nodeset, droppednodeset)
-	     || hwloc_bitmap_iszero(obj->complete_cpuset));
   }
-  if (droppednodeset) {
+  if (droppednodeset && hwloc_bitmap_intersects(obj->complete_nodeset, droppednodeset)) {
     hwloc_bitmap_andnot(obj->nodeset, obj->nodeset, droppednodeset);
     hwloc_bitmap_andnot(obj->complete_nodeset, obj->complete_nodeset, droppednodeset);
+    modified = 1;
   }
 
   if (modified) {
@@ -4252,20 +4423,11 @@ restrict_object_by_nodeset(hwloc_topology_t topology, unsigned long flags, hwloc
     hwloc_bitmap_andnot(obj->nodeset, obj->nodeset, droppednodeset);
     hwloc_bitmap_andnot(obj->complete_nodeset, obj->complete_nodeset, droppednodeset);
     modified = 1;
-  } else {
-    if ((flags & HWLOC_RESTRICT_FLAG_REMOVE_MEMLESS)
-	&& hwloc_bitmap_iszero(obj->complete_nodeset)) {
-      /* we're empty, there's a PU below us, it'll be removed this time */
-      modified = 1;
-    }
-    /* cpuset cannot intersect unless nodeset intersects or is empty */
-    if (droppedcpuset)
-      assert(!hwloc_bitmap_intersects(obj->complete_cpuset, droppedcpuset)
-	     || hwloc_bitmap_iszero(obj->complete_nodeset));
   }
-  if (droppedcpuset) {
+  if (droppedcpuset && hwloc_bitmap_intersects(obj->complete_cpuset, droppedcpuset)) {
     hwloc_bitmap_andnot(obj->cpuset, obj->cpuset, droppedcpuset);
     hwloc_bitmap_andnot(obj->complete_cpuset, obj->complete_cpuset, droppedcpuset);
+    modified = 1;
   }
 
   if (modified) {
@@ -4434,13 +4596,18 @@ hwloc_topology_restrict(struct hwloc_topology *topology, hwloc_const_bitmap_t se
   if (hwloc_filter_levels_keep_structure(topology) < 0) /* takes care of reconnecting internally */
     goto out;
 
-  /* some objects may have disappeared, we need to update distances objs arrays */
-  hwloc_internal_distances_invalidate_cached_objs(topology);
-  hwloc_internal_memattrs_need_refresh(topology);
+  /* some objects may have disappeared and sets were modified,
+   * we need to update distances, etc */
+  if (!(topology->flags & HWLOC_TOPOLOGY_FLAG_NO_DISTANCES))
+    hwloc_internal_distances_invalidate_cached_objs(topology);
+  if (!(topology->flags & HWLOC_TOPOLOGY_FLAG_NO_MEMATTRS))
+    hwloc_internal_memattrs_need_refresh(topology);
+  if (!(topology->flags & HWLOC_TOPOLOGY_FLAG_NO_CPUKINDS))
+    hwloc_internal_cpukinds_restrict(topology);
+
 
   hwloc_propagate_symmetric_subtree(topology, topology->levels[0][0]);
   propagate_total_memory(topology->levels[0][0]);
-  hwloc_internal_cpukinds_restrict(topology);
 
 #ifndef HWLOC_DEBUG
   if (getenv("HWLOC_DEBUG_CHECK"))
@@ -4463,11 +4630,6 @@ hwloc_topology_allow(struct hwloc_topology *topology,
 {
   if (!(topology->state & HWLOC_TOPOLOGY_STATE_IS_LOADED))
     goto einval;
-
-  if (topology->adopted_shmem_addr) {
-    errno = EPERM;
-    goto error;
-  }
 
   if (!(topology->flags & HWLOC_TOPOLOGY_FLAG_INCLUDE_DISALLOWED))
     goto einval;
@@ -4528,9 +4690,12 @@ hwloc_topology_allow(struct hwloc_topology *topology,
 int
 hwloc_topology_refresh(struct hwloc_topology *topology)
 {
-  hwloc_internal_cpukinds_rank(topology);
-  hwloc_internal_distances_refresh(topology);
-  hwloc_internal_memattrs_refresh(topology);
+  if (!(topology->flags & HWLOC_TOPOLOGY_FLAG_NO_CPUKINDS))
+    hwloc_internal_cpukinds_rank(topology);
+  if (!(topology->flags & HWLOC_TOPOLOGY_FLAG_NO_DISTANCES))
+    hwloc_internal_distances_refresh(topology);
+  if (!(topology->flags & HWLOC_TOPOLOGY_FLAG_NO_MEMATTRS))
+    hwloc_internal_memattrs_refresh(topology);
   return 0;
 }
 
@@ -5081,6 +5246,9 @@ hwloc_topology_check(struct hwloc_topology *topology)
     assert(obj_order_type[obj_type_order[type]] == type);
   for(i=HWLOC_OBJ_TYPE_MIN; i<HWLOC_OBJ_TYPE_MAX; i++)
     assert(obj_type_order[obj_order_type[i]] == i);
+
+  if (topology->state & HWLOC_TOPOLOGY_STATE_IS_INIT)
+    return;
 
   depth = hwloc_topology_get_depth(topology);
 

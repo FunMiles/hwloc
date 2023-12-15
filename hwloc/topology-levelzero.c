@@ -1,5 +1,5 @@
 /*
- * Copyright © 2020-2022 Inria.  All rights reserved.
+ * Copyright © 2020-2023 Inria.  All rights reserved.
  * See COPYING in top-level directory.
  */
 
@@ -228,7 +228,7 @@ hwloc__levelzero_memory_get_from_sysman(zes_device_handle_t h,
           if (mprop.onSubdevice) {
             if (mprop.subdeviceId >= nr_osdevs || !nr_osdevs || !sub_osdevs) {
               if (HWLOC_SHOW_ALL_ERRORS())
-                fprintf(stderr, "LevelZero: memory module #%u on unexpected subdeviceId #%u\n", m, mprop.subdeviceId);
+                fprintf(stderr, "hwloc/levelzero: memory module #%u on unexpected subdeviceId #%u\n", m, mprop.subdeviceId);
               osdev = NULL; /* we'll ignore it but we'll still agregate its subdevice memories into totalHBM/DDRkB */
             } else {
               osdev = sub_osdevs[mprop.subdeviceId];
@@ -382,6 +382,7 @@ struct hwloc_levelzero_ports {
   unsigned nr;
   struct hwloc_levelzero_port {
     hwloc_obj_t osdev;
+    hwloc_obj_t parent_osdev;
     zes_fabric_port_properties_t props;
     zes_fabric_port_state_t state;
   } *ports;
@@ -443,11 +444,14 @@ hwloc__levelzero_ports_get(zes_device_handle_t dvh,
                   i, hports->ports[id].props.subdeviceId);
       if (hports->ports[id].props.subdeviceId < nr_sub_osdevs) {
         hports->ports[id].osdev = sub_osdevs[hports->ports[id].props.subdeviceId];
+        hports->ports[id].parent_osdev = root_osdev;
       } else {
         hwloc_debug("    no such subdevice exists, ignoring\n");
         continue;
       }
+    } else {
       hports->ports[id].osdev = root_osdev;
+      hports->ports[id].parent_osdev = NULL;
     }
 
     res = zesFabricPortGetState(ports[i], &hports->ports[id].state);
@@ -548,7 +552,14 @@ hwloc__levelzero_ports_connect(struct hwloc_topology *topology,
           if (iindex<0 || jindex<0)
             continue;
           bws[iindex*oarray->nr+jindex] += hports->ports[i].state.rxSpeed.bitRate >> 20; /* MB/s */
-          /* TODO: way to accumulate subdevs bw into rootdevs? tranformation? different matrix? */
+          if (hports->ports[i].parent_osdev && hports->ports[j].parent_osdev) {
+            /* also accumulate in root devices */
+            iindex = hwloc__levelzero_osdev_array_find(oarray, hports->ports[i].parent_osdev);
+            jindex = hwloc__levelzero_osdev_array_find(oarray, hports->ports[j].parent_osdev);
+            if (iindex<0 || jindex<0)
+              continue;
+            bws[iindex*oarray->nr+jindex] += hports->ports[i].state.rxSpeed.bitRate >> 20; /* MB/s */
+          }
           gotbw++;
         }
       }
@@ -601,21 +612,29 @@ hwloc_levelzero_discover(struct hwloc_backend *backend, struct hwloc_disc_status
   enum hwloc_type_filter_e filter;
   ze_result_t res;
   ze_driver_handle_t *drh;
-  uint32_t nbdrivers, i, k, zeidx;
+  uint32_t nbdrivers, i, k, zeidx, added = 0;
   struct hwloc_osdev_array oarray;
   struct hwloc_levelzero_ports hports;
   int sysman_maybe_missing = 0; /* 1 if ZES_ENABLE_SYSMAN=1 was NOT set early, 2 if ZES_ENABLE_SYSMAN=0 */
   char *env;
-
-  hwloc__levelzero_osdev_array_init(&oarray);
-
-  hwloc__levelzero_ports_init(&hports);
 
   assert(dstatus->phase == HWLOC_DISC_PHASE_IO);
 
   hwloc_topology_get_type_filter(topology, HWLOC_OBJ_OS_DEVICE, &filter);
   if (filter == HWLOC_TYPE_FILTER_KEEP_NONE)
     return 0;
+
+  hwloc__levelzero_osdev_array_init(&oarray);
+
+  hwloc__levelzero_ports_init(&hports);
+
+#ifdef HWLOC_HAVE_ZESINIT
+  res = zesInit(0);
+  if (res != ZE_RESULT_SUCCESS) {
+    hwloc_debug("hwloc/levelzero: Failed to initialize LevelZero Sysman in zesInit(): 0x%x\n", (unsigned)res);
+    hwloc_debug("hwloc/levelzero: Continuing. Hopefully ZES_ENABLE_SYSMAN=1\n");
+  }
+#endif /* HWLOC_HAVE_ZESINIT */
 
   /* Tell L0 to create sysman devices.
    * If somebody already initialized L0 without Sysman,
@@ -640,7 +659,7 @@ hwloc_levelzero_discover(struct hwloc_backend *backend, struct hwloc_disc_status
   res = zeInit(0);
   if (res != ZE_RESULT_SUCCESS) {
     if (HWLOC_SHOW_ALL_ERRORS()) {
-      fprintf(stderr, "Failed to initialize LevelZero in ze_init(): 0x%x\n", (unsigned)res);
+      fprintf(stderr, "hwloc/levelzero: Failed to initialize in zeInit(): 0x%x\n", (unsigned)res);
     }
     return 0;
   }
@@ -699,9 +718,8 @@ hwloc_levelzero_discover(struct hwloc_backend *backend, struct hwloc_disc_status
       snprintf(buffer, sizeof(buffer), "ze%u", zeidx); // ze0d0 ?
       osdev->name = strdup(buffer);
       osdev->depth = HWLOC_TYPE_DEPTH_UNKNOWN;
-      osdev->attr->osdev.type = HWLOC_OBJ_OSDEV_COPROC;
+      osdev->attr->osdev.type = HWLOC_OBJ_OSDEV_COPROC | HWLOC_OBJ_OSDEV_GPU;
       osdev->subtype = strdup("LevelZero");
-      hwloc_obj_add_info(osdev, "Backend", "LevelZero");
 
       snprintf(buffer, sizeof(buffer), "%u", i);
       hwloc_obj_add_info(osdev, "LevelZeroDriverIndex", buffer);
@@ -725,12 +743,11 @@ hwloc_levelzero_discover(struct hwloc_backend *backend, struct hwloc_disc_status
           zeDeviceGetSubDevices(dvh[j], &nr_subdevices, subh);
           for(k=0; k<nr_subdevices; k++) {
             subosdevs[k] = hwloc_alloc_setup_object(topology, HWLOC_OBJ_OS_DEVICE, HWLOC_UNKNOWN_INDEX);
-            snprintf(buffer, sizeof(buffer), "ze%u.%u", zeidx, k);
-            subosdevs[k]->name = strdup(buffer);
+            snprintf(tmp, sizeof(tmp), "ze%u.%u", zeidx, k);
+            subosdevs[k]->name = strdup(tmp);
             subosdevs[k]->depth = HWLOC_TYPE_DEPTH_UNKNOWN;
-            subosdevs[k]->attr->osdev.type = HWLOC_OBJ_OSDEV_COPROC;
+            subosdevs[k]->attr->osdev.type = HWLOC_OBJ_OSDEV_COPROC | HWLOC_OBJ_OSDEV_GPU;
             subosdevs[k]->subtype = strdup("LevelZero");
-            hwloc_obj_add_info(subosdevs[k], "Backend", "LevelZero");
             snprintf(tmp, sizeof(tmp), "%u", k);
             hwloc_obj_add_info(subosdevs[k], "LevelZeroSubdeviceID", tmp);
 
@@ -797,11 +814,13 @@ hwloc_levelzero_discover(struct hwloc_backend *backend, struct hwloc_disc_status
        */
       hwloc_insert_object_by_parent(topology, parent, osdev);
       hwloc__levelzero_osdev_array_add(&oarray, osdev);
+      added++;
       if (nr_subdevices) {
         for(k=0; k<nr_subdevices; k++)
           if (subosdevs[k]) {
             hwloc_insert_object_by_parent(topology, osdev, subosdevs[k]);
             hwloc__levelzero_osdev_array_add(&oarray, subosdevs[k]);
+            added++;
           }
         free(subosdevs);
         free(subh);
@@ -818,6 +837,9 @@ hwloc_levelzero_discover(struct hwloc_backend *backend, struct hwloc_disc_status
   hwloc__levelzero_osdev_array_free(&oarray);
 
   free(drh);
+
+  if (added)
+    hwloc_modify_infos(hwloc_topology_get_infos(topology), HWLOC_MODIFY_INFOS_OP_ADD, "Backend", "LevelZero");
   return 0;
 }
 
@@ -831,7 +853,7 @@ hwloc_levelzero_component_instantiate(struct hwloc_topology *topology,
 {
   struct hwloc_backend *backend;
 
-  backend = hwloc_backend_alloc(topology, component);
+  backend = hwloc_backend_alloc(topology, component, 0);
   if (!backend)
     return NULL;
   backend->discover = hwloc_levelzero_discover;

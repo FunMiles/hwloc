@@ -1,5 +1,5 @@
 /*
- * Copyright © 2012-2022 Inria.  All rights reserved.
+ * Copyright © 2012-2023 Inria.  All rights reserved.
  * Copyright (c) 2020, Advanced Micro Devices, Inc. All rights reserved.
  * Written by Advanced Micro Devices,
  * See COPYING in top-level directory.
@@ -160,7 +160,7 @@ static int get_device_unique_id(uint32_t dv_ind, char *buffer)
   if (rsmi_rc != RSMI_STATUS_SUCCESS) {
     return -1;
   }
-  sprintf(buffer, "%lx", id);
+  sprintf(buffer, "%llx", (unsigned long long) id);
   return 0;
 }
 
@@ -200,7 +200,7 @@ static int get_device_xgmi_hive_id(uint32_t dv_ind, char *buffer)
     }
     return -1;
   }
-  sprintf(buffer, "%lx", hive_id);
+  sprintf(buffer, "%llx", (unsigned long long) hive_id);
   return 0;
 }
 
@@ -246,7 +246,7 @@ hwloc_rsmi_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dst
   rsmi_version_t version;
   rsmi_status_t ret;
   int may_shutdown;
-  unsigned nb, i, j;
+  unsigned nb, i, j, added = 0;
 
   assert(dstatus->phase == HWLOC_DISC_PHASE_IO);
 
@@ -294,9 +294,8 @@ hwloc_rsmi_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dst
     osdev->name = strdup(buffer);
     osdev->subtype = strdup("RSMI");
     osdev->depth = HWLOC_TYPE_DEPTH_UNKNOWN;
-    osdev->attr->osdev.type = HWLOC_OBJ_OSDEV_GPU;
+    osdev->attr->osdev.type = HWLOC_OBJ_OSDEV_GPU | HWLOC_OBJ_OSDEV_COPROC;
 
-    hwloc_obj_add_info(osdev, "Backend", "RSMI");
     hwloc_obj_add_info(osdev, "GPUVendor", "AMD");
 
     buffer[0] = '\0';
@@ -374,6 +373,7 @@ hwloc_rsmi_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dst
 
     hwloc_insert_object_by_parent(topology, parent, osdev);
     osdevs[i] = osdevs2[i] = osdev;
+    added++;
   }
 
   if (hwloc_topology_get_flags(topology) & HWLOC_TOPOLOGY_FLAG_NO_DISTANCES)
@@ -416,6 +416,9 @@ hwloc_rsmi_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dst
   free(xgmi_bws);
   free(osdevs2);
   free(xgmi_hops);
+
+  if (added)
+    hwloc_modify_infos(hwloc_topology_get_infos(topology), HWLOC_MODIFY_INFOS_OP_ADD, "Backend", "RSMI");
   return 0;
 }
 
@@ -429,7 +432,7 @@ hwloc_rsmi_component_instantiate(struct hwloc_topology *topology,
 {
   struct hwloc_backend *backend;
 
-  backend = hwloc_backend_alloc(topology, component);
+  backend = hwloc_backend_alloc(topology, component, 0);
   if (!backend)
     return NULL;
   backend->discover = hwloc_rsmi_discover;

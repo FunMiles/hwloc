@@ -1,5 +1,5 @@
 #
-# Copyright © 2018-2022 Inria.  All rights reserved.
+# Copyright © 2018-2023 Inria.  All rights reserved.
 # See COPYING in top-level directory.
 #
 
@@ -24,7 +24,7 @@ _lstopo() {
 		   -f --force
 		   --only
 		   -v --verbose
-		   -s --silent
+		   -q --quiet -s --silent
 		   --distances
 		   --distances-transform
 		   --memattrs
@@ -80,6 +80,7 @@ _lstopo() {
 		   --export-xml-flags
 		   --export-synthetic-flags
 		   --ps --top
+		   --misc-from
 		   --version
 		   -h --help
 		  )
@@ -161,7 +162,7 @@ _hwloc_info(){
 		   --topology
 		   --support
 		   -v --verbose
-		   -s --silent
+		   -q --quiet -s --silent
 		   --ancestors
 		   --ancestor
 		   --children
@@ -169,6 +170,7 @@ _hwloc_info(){
 		   --local-memory
 		   --local-memory-flags
 		   --best-memattr
+		   --first
 		   -n
 		   --restrict
 		   --restrict-flags
@@ -217,7 +219,7 @@ _hwloc_info(){
 		COMPREPLY=( `compgen -W "${TYPES[*]/%/:} cache: icache: io:" -- "$cur"` ) && compopt -o nospace
 		;;
 	    --ancestor | --descendants)
-		COMPREPLY=( `compgen -W "${TYPES[*]}" -- "$cur"` )
+		COMPREPLY=( `compgen -W "${TYPES[*]}" -- "$cur"` kind=normal kind=cpu kind=cache kind=memory kind=io kind=all )
 		;;
 	    --local-memory-flags)
 		COMPREPLY=( "<flags>" "" )
@@ -307,6 +309,7 @@ _hwloc_calc(){
 		   -n --nodeset
 		   --ni --nodeset-input
 		   --no --nodeset-output
+                   --oo --object-output
 		   --sep
 		   --taskset
 		   --single
@@ -480,6 +483,7 @@ complete -F _hwloc_distrib hwloc-distrib
 _hwloc_ps(){
     local OPTIONS=(-a
 		   --pid
+		   --children-of-pid
 		   --name
 		   --uid
 		   -l --logical
@@ -491,6 +495,7 @@ _hwloc_ps(){
 		   --pid-cmd
 		   --short-name
 		   --disallowed --whole-system
+		   --lstopo-misc
 		   --json-server
 		   --json-port
 		   -v --verbose
@@ -510,7 +515,7 @@ _hwloc_ps(){
 	--uid)
 	    COMPREPLY=( "<uid>" "all" "" )
 	    ;;
-	--pid)
+	--pid|--children-of-pid)
 	    COMPREPLY=( "<pid>" "" )
 	    ;;
 	--pid-cmd)
@@ -527,7 +532,7 @@ complete -F _hwloc_ps hwloc-ps
 
 _hwloc_gather_cpuid(){
     local OPTIONS=(-c
-		   -s --silent
+		   -q --quiet -s --silent
 		   --version
 		   -h --help
 		   )
@@ -550,6 +555,7 @@ complete -F _hwloc_gather_cpuid hwloc-gather-cpuid
 _hwloc_gather_topology(){
     local OPTIONS=(--io
 		   --dmi
+		   --dt
 		   --no-cpuid
 		   --keep
 		   --version

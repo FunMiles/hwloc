@@ -12,7 +12,7 @@ if test "x$dst" = "x" -o "x$dst" = "x-h" -o "x$dst" = "x--help"; then
   exit_usage
 fi
 
-EXAMPLE=v2.0.4
+EXAMPLE=v2.8.0
 if test -d "$dst/projects/hwloc/doc/$EXAMPLE/"; then
   dst=`realpath "$dst/projects/hwloc/doc/"`
 else if test -d "$dst/hwloc/doc/$EXAMPLE/"; then
@@ -62,6 +62,11 @@ cp -f doc/doxygen-doc/hwloc-letter.pdf "$dst/hwloc-v${VERSION}-letter.pdf"
 
 echo "Installing v${VERSION}/ HTML directory ..."
 rsync -avz doc/www.open-mpi.org*inc doc/www.open-mpi.org/html/ "$dst/v${VERSION}/"
+
+echo
+echo "Replacing jquery.js with the common one ..."
+rm -f "$dst/v${VERSION}/jquery.js"
+ln -sf ../../../../includes/jquery.js "$dst/v${VERSION}/jquery.js"
 
 echo
 cd "$dst/v${VERSION}/"

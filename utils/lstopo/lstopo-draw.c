@@ -1,6 +1,6 @@
 /*
  * Copyright © 2009 CNRS
- * Copyright © 2009-2022 Inria.  All rights reserved.
+ * Copyright © 2009-2023 Inria.  All rights reserved.
  * Copyright © 2009-2013, 2015 Université Bordeaux
  * Copyright © 2009-2011 Cisco Systems, Inc.  All rights reserved.
  * See COPYING in top-level directory.
@@ -371,9 +371,6 @@ static float pci_link_speed(hwloc_obj_t obj)
  * Placing children in rectangle
  */
 
-/* preferred width/height compromise */
-#define RATIO (4.f/3.f)
-
 /* returns a score <= 1. close to 1 is better */
 static __hwloc_inline
 float rectangle_score(unsigned width, unsigned height, float ratio)
@@ -553,10 +550,13 @@ place_children_rect(struct lstopo_output *loutput, hwloc_obj_t parent,
   float ratio;
   int i;
 
-  if (parent->type == HWLOC_OBJ_CORE)
-    ratio = 1/RATIO;
+  /* preferred width/height compromise */
+  if (kind == LSTOPO_CHILD_KIND_MEMORY)
+    ratio = 8.f; /* very large for memory above objects since the parent is usually very large */
+  else if (parent->type == HWLOC_OBJ_CORE)
+    ratio = 3.f/4.f; /* rather high Core objects since they often contain 2 PUs that we don't want horizontal */
   else
-    ratio = RATIO;
+    ratio = 4.f/3.f; /* rather largeother objects */
   find_children_rectangle(loutput, parent, kind, separator, &rows, &columns, ratio);
 
   rowwidth = 0;
@@ -626,7 +626,7 @@ place_children(struct lstopo_output *loutput, hwloc_obj_t parent,
 	       unsigned xrel, unsigned yrel /* position of children within parent */)
 {
   struct lstopo_obj_userdata *plud = parent->userdata;
-  enum lstopo_orient_e main_orient, right_orient, below_orient;
+  enum lstopo_orient_e main_orient, right_orient, below_orient, above_orient;
   unsigned border = loutput->gridsize;
   unsigned separator = loutput->gridsize;
   unsigned separator_below_cache = loutput->gridsize;
@@ -674,6 +674,10 @@ place_children(struct lstopo_output *loutput, hwloc_obj_t parent,
   below_orient = loutput->below_force_orient;
   if (below_orient == LSTOPO_ORIENT_NONE)
     below_orient = loutput->force_orient[parent->type];
+  /* place above children in rectangle by default */
+  above_orient = loutput->above_force_orient;
+  if (above_orient == LSTOPO_ORIENT_NONE)
+    above_orient = LSTOPO_ORIENT_RECT;
 
   /* defaults */
   plud->children.box = 0;
@@ -790,7 +794,6 @@ place_children(struct lstopo_output *loutput, hwloc_obj_t parent,
 
   /* compute the size of the above children section (Memory), if any */
   if (plud->above_children.kinds) {
-    enum lstopo_orient_e morient = LSTOPO_ORIENT_HORIZ;
     int need_box;
 
     assert(plud->above_children.kinds == LSTOPO_CHILD_KIND_MEMORY);
@@ -801,7 +804,7 @@ place_children(struct lstopo_output *loutput, hwloc_obj_t parent,
     need_box = !hwloc_obj_type_is_memory(parent->type)
       && (parent->memory_arity + parent->memory_first_child->memory_arity > 1);
 
-    place__children(loutput, parent, plud->above_children.kinds, &morient, need_box ? border : 0, separator, &above_children_width, &above_children_height);
+    place__children(loutput, parent, plud->above_children.kinds, &above_orient, need_box ? border : 0, separator, &above_children_width, &above_children_height);
     if (parent->type == HWLOC_OBJ_MEMCACHE)
       above_children_height -= separator;
 
@@ -1136,7 +1139,8 @@ lstopo_set_object_color(struct lstopo_output *loutput,
   }
 
   case HWLOC_OBJ_MISC:
-    if (loutput->show_process_color && obj->subtype && !strcmp(obj->subtype, "Process"))
+    if (loutput->show_process_color && obj->subtype &&
+        (!strcmp(obj->subtype, "Process") || !strcmp(obj->subtype, "Thread")))
       s->bg = &loutput->palette->process;
     else
       s->bg = &loutput->palette->misc;
@@ -1255,7 +1259,7 @@ prepare_text(struct lstopo_output *loutput, hwloc_obj_t obj)
 
   if (loutput->show_attrs_enabled && loutput->show_attrs[obj->type]) {
     if (HWLOC_OBJ_OS_DEVICE == obj->type) {
-      if (HWLOC_OBJ_OSDEV_COPROC == obj->attr->osdev.type && obj->subtype) {
+      if ((HWLOC_OBJ_OSDEV_COPROC & obj->attr->osdev.type) && obj->subtype) {
 	/* Coprocessor */
 	if (!strcmp(obj->subtype, "CUDA")) {
 	  /* CUDA */
@@ -1322,7 +1326,7 @@ prepare_text(struct lstopo_output *loutput, hwloc_obj_t obj)
           if (!valueMem)
             valueMem = hwloc_obj_get_info_by_name(obj, "LevelZeroMemorySize");
           if (valueMem) {
-            unsigned long long bytes = strtoull(valueMem, NULL, 10) / 1024;
+            unsigned long long bytes = strtoull(valueMem, NULL, 10) * 1024;
             hwloc_memory_size_snprintf(lud->text[lud->ntext++].text, sizeof(lud->text[0].text), bytes, loutput->obj_snprintf_flags);
           }
           valueSl = hwloc_obj_get_info_by_name(obj, "LevelZeroNumSlices");
@@ -1336,14 +1340,22 @@ prepare_text(struct lstopo_output *loutput, hwloc_obj_t obj)
           }
         }
 
-      } else if (HWLOC_OBJ_OSDEV_BLOCK == obj->attr->osdev.type) {
-	/* Block */
+      }
+      if ((HWLOC_OBJ_OSDEV_STORAGE|HWLOC_OBJ_OSDEV_MEMORY) & obj->attr->osdev.type) {
+	/* Storage or Memory size */
 	const char *value;
 	value = hwloc_obj_get_info_by_name(obj, "Size");
 	if (value) {
 	  unsigned long long bytes = strtoull(value, NULL, 10) * 1024;
 	  hwloc_memory_size_snprintf(lud->text[lud->ntext++].text, sizeof(lud->text[0].text), bytes, loutput->obj_snprintf_flags);
 	}
+
+      }
+      if (HWLOC_OBJ_OSDEV_MEMORY) {
+	/* Memory
+         * Size was printed above in STORAGE|MEMORY.
+         */
+	const char *value;
 	value = hwloc_obj_get_info_by_name(obj, "CXLRAMSize");
 	if (value) {
 	  unsigned long long bytes = strtoull(value, NULL, 10) * 1024;
@@ -1725,7 +1737,11 @@ output_draw(struct lstopo_output *loutput)
     unsigned maxtextwidth = 0, textwidth;
     unsigned ndl = 0;
     char hostname[122] = "";
-    unsigned long hostname_size = sizeof(hostname);
+#if defined(HWLOC_WIN_SYS) && !defined(__CYGWIN__)
+    DWORD hostname_size = sizeof(hostname);
+#else
+    size_t hostname_size = sizeof(hostname);
+#endif
     unsigned infocount = 0;
 
     /* prepare legend lines and compute the width */
@@ -1808,10 +1824,10 @@ output_draw(struct lstopo_output *loutput)
 
     if (loutput->show_legend != LSTOPO_SHOW_LEGEND_NONE) {
       /* look at custom legend lines in root info attr and --append-legend */
-      for(i=0; i<root->infos_count; i++) {
-        if (!strcmp(root->infos[i].name, "lstopoLegend")) {
+      for(i=0; i<root->infos.count; i++) {
+        if (!strcmp(root->infos.array[i].name, "lstopoLegend")) {
           infocount++;
-          textwidth = get_textwidth(loutput, root->infos[i].value, (unsigned) strlen(root->infos[i].value), fontsize);
+          textwidth = get_textwidth(loutput, root->infos.array[i].value, (unsigned) strlen(root->infos.array[i].value), fontsize);
           if (textwidth > maxtextwidth)
             maxtextwidth = textwidth;
         }
@@ -1871,9 +1887,9 @@ output_draw(struct lstopo_output *loutput)
                    NULL, 0);
       for(i=0; i<loutput->legend_default_lines_nr; i++, offset += linespacing + fontsize)
 	methods->text(loutput, &loutput->palette->black, fontsize, depth, gridsize, offset, loutput->legend_default_lines[i], NULL, i);
-      for(i=0, j=0; i<root->infos_count; i++) {
-        if (!strcmp(root->infos[i].name, "lstopoLegend")) {
-          methods->text(loutput, &loutput->palette->black, fontsize, depth, gridsize, offset, root->infos[i].value, NULL, j+loutput->legend_default_lines_nr);
+      for(i=0, j=0; i<root->infos.count; i++) {
+        if (!strcmp(root->infos.array[i].name, "lstopoLegend")) {
+          methods->text(loutput, &loutput->palette->black, fontsize, depth, gridsize, offset, root->infos.array[i].value, NULL, j+loutput->legend_default_lines_nr);
           j++;
           offset += linespacing + fontsize;
         }

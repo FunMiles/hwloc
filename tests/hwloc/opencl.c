@@ -1,5 +1,5 @@
 /*
- * Copyright © 2012-2018 Inria.  All rights reserved.
+ * Copyright © 2012-2023 Inria.  All rights reserved.
  * See COPYING in top-level directory.
  */
 
@@ -17,18 +17,32 @@
 
 /* check the OpenCL helpers */
 
+static int check_opencl_backend(hwloc_topology_t topology)
+{
+  struct hwloc_infos_s *infos = hwloc_topology_get_infos(topology);
+  unsigned i;
+  for(i=0; i<infos->count; i++)
+    if (!strcmp(infos->array[i].name, "Backend")
+        && !strcmp(infos->array[i].value, "OpenCL"))
+      return 1;
+  return 0;
+}
+
 int main(void)
 {
   hwloc_topology_t topology;
   cl_int clret;
   cl_platform_id *platform_ids;
   unsigned nrp, nrd, count, i, j;
+  int has_opencl_backend;
   int err;
 
   hwloc_topology_init(&topology);
   hwloc_topology_set_type_filter(topology, HWLOC_OBJ_PCI_DEVICE, HWLOC_TYPE_FILTER_KEEP_IMPORTANT);
   hwloc_topology_set_type_filter(topology, HWLOC_OBJ_OS_DEVICE, HWLOC_TYPE_FILTER_KEEP_IMPORTANT);
   hwloc_topology_load(topology);
+
+  has_opencl_backend = check_opencl_backend(topology);
 
   clret = clGetPlatformIDs(0, NULL, &nrp);
   if (CL_SUCCESS != clret || !nrp)
@@ -102,11 +116,10 @@ int main(void)
       assert(p == i);
       assert(d == j);
 
-      value = hwloc_obj_get_info_by_name(osdev, "Backend");
-      err = strcmp(value, "OpenCL");
-      assert(!err);
+      assert(has_opencl_backend);
 
-      assert(osdev->attr->osdev.type == HWLOC_OBJ_OSDEV_COPROC);
+      assert((osdev->attr->osdev.type == HWLOC_OBJ_OSDEV_COPROC)
+             || (osdev->attr->osdev.type == (HWLOC_OBJ_OSDEV_COPROC|HWLOC_OBJ_OSDEV_GPU)));
 
       value = osdev->subtype;
       assert(value);

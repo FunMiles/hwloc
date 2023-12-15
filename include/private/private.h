@@ -1,6 +1,6 @@
 /*
  * Copyright © 2009      CNRS
- * Copyright © 2009-2022 Inria.  All rights reserved.
+ * Copyright © 2009-2023 Inria.  All rights reserved.
  * Copyright © 2009-2012, 2020 Université Bordeaux
  * Copyright © 2009-2011 Cisco Systems, Inc.  All rights reserved.
  *
@@ -145,6 +145,8 @@ struct hwloc_topology {
 
   struct hwloc_topology_support support;
 
+  struct hwloc_infos_s infos;
+
   void (*userdata_export_cb)(void *reserved, struct hwloc_topology *topology, struct hwloc_obj *obj);
   void (*userdata_import_cb)(struct hwloc_topology *topology, struct hwloc_obj *obj, const char *name, const void *buffer, size_t length);
   int userdata_not_decoded;
@@ -224,8 +226,7 @@ struct hwloc_topology {
     int efficiency;
     int forced_efficiency; /* returned by the hardware or OS if any */
     hwloc_uint64_t ranking_value; /* internal value for ranking */
-    unsigned nr_infos;
-    struct hwloc_info_s *infos;
+    struct hwloc_infos_s infos;
   } *cpukinds;
 
   int grouping;
@@ -252,6 +253,12 @@ struct hwloc_topology {
   /*
    * temporary variables during discovery
    */
+
+  /* set to 1 at the beginning of load() if the filter of any cpu cache type (L1 to L3i) is not NONE,
+   * may be checked by backends before querying caches
+   * (when they don't know the level of caches they are querying).
+   */
+  int want_some_cpu_caches;
 
   /* machine-wide memory.
    * temporarily stored there by OSes that only provide this without NUMA information,
@@ -320,11 +327,11 @@ extern void hwloc_pci_discovery_exit(struct hwloc_topology *topology);
  */
 extern hwloc_obj_t hwloc_find_insert_io_parent_by_complete_cpuset(struct hwloc_topology *topology, hwloc_cpuset_t cpuset);
 
-extern int hwloc__add_info(struct hwloc_info_s **infosp, unsigned *countp, const char *name, const char *value);
-extern int hwloc__add_info_nodup(struct hwloc_info_s **infosp, unsigned *countp, const char *name, const char *value, int replace);
-extern int hwloc__move_infos(struct hwloc_info_s **dst_infosp, unsigned *dst_countp, struct hwloc_info_s **src_infosp, unsigned *src_countp);
-extern int hwloc__tma_dup_infos(struct hwloc_tma *tma, struct hwloc_info_s **dst_infosp, unsigned *dst_countp, struct hwloc_info_s *src_infos, unsigned src_count);
-extern void hwloc__free_infos(struct hwloc_info_s *infos, unsigned count);
+extern int hwloc__add_info(struct hwloc_infos_s *infos, const char *name, const char *value);
+extern int hwloc__replace_infos(struct hwloc_infos_s *infos, const char *name, const char *value);
+extern int hwloc__move_infos(struct hwloc_infos_s *dst_infos, struct hwloc_infos_s *src_infos);
+extern int hwloc__tma_dup_infos(struct hwloc_tma *tma, struct hwloc_infos_s *dst_infos, struct hwloc_infos_s *src_infos);
+extern void hwloc__free_infos(struct hwloc_infos_s *infos);
 
 /* set native OS binding hooks */
 extern void hwloc_set_native_binding_hooks(struct hwloc_binding_hooks *hooks, struct hwloc_topology_support *support);
@@ -424,14 +431,14 @@ extern void hwloc_internal_memattrs_need_refresh(hwloc_topology_t topology);
 extern void hwloc_internal_memattrs_refresh(hwloc_topology_t topology);
 extern int hwloc_internal_memattrs_dup(hwloc_topology_t new, hwloc_topology_t old);
 extern int hwloc_internal_memattr_set_value(hwloc_topology_t topology, hwloc_memattr_id_t id, hwloc_obj_type_t target_type, hwloc_uint64_t target_gp_index, unsigned target_os_index, struct hwloc_internal_location_s *initiator, hwloc_uint64_t value);
-extern int hwloc_internal_memattrs_guess_memory_tiers(hwloc_topology_t topology);
+extern int hwloc_internal_memattrs_guess_memory_tiers(hwloc_topology_t topology, int force_subtype);
 
 extern void hwloc_internal_cpukinds_init(hwloc_topology_t topology);
 extern int hwloc_internal_cpukinds_rank(hwloc_topology_t topology);
 extern void hwloc_internal_cpukinds_destroy(hwloc_topology_t topology);
 extern int hwloc_internal_cpukinds_dup(hwloc_topology_t new, hwloc_topology_t old);
 #define HWLOC_CPUKINDS_REGISTER_FLAG_OVERWRITE_FORCED_EFFICIENCY (1<<0)
-extern int hwloc_internal_cpukinds_register(hwloc_topology_t topology, hwloc_cpuset_t cpuset, int forced_efficiency, const struct hwloc_info_s *infos, unsigned nr_infos, unsigned long flags);
+extern int hwloc_internal_cpukinds_register(hwloc_topology_t topology, hwloc_cpuset_t cpuset, int forced_efficiency, const struct hwloc_infos_s *infos, unsigned long flags);
 extern void hwloc_internal_cpukinds_restrict(hwloc_topology_t topology);
 
 /* encode src buffer into target buffer.
@@ -519,6 +526,7 @@ extern char * hwloc_progname(struct hwloc_topology *topology);
 #define HWLOC_GROUP_KIND_INTEL_DIE			104	/* no subkind */
 #define HWLOC_GROUP_KIND_S390_BOOK			110	/* subkind 0 is book, subkind 1 is drawer (group of books) */
 #define HWLOC_GROUP_KIND_AMD_COMPUTE_UNIT		120	/* no subkind */
+#define HWLOC_GROUP_KIND_AMD_COMPLEX                    121     /* no subkind */
 /* then, OS-specific groups */
 #define HWLOC_GROUP_KIND_SOLARIS_PG_HW_PERF		200	/* subkind is group width */
 #define HWLOC_GROUP_KIND_AIX_SDL_UNKNOWN		210	/* subkind is SDL level */

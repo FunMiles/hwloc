@@ -1,6 +1,6 @@
 /*
  * Copyright © 2012-2013 Blue Brain Project, BBP/EPFL. All rights reserved.
- * Copyright © 2012-2021 Inria.  All rights reserved.
+ * Copyright © 2012-2023 Inria.  All rights reserved.
  * See COPYING in top-level directory.
  */
 
@@ -32,7 +32,7 @@ hwloc_gl_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dstat
 
   struct hwloc_topology *topology = backend->topology;
   enum hwloc_type_filter_e filter;
-  unsigned i;
+  unsigned i, added = 0;
   int err;
 
   assert(dstatus->phase == HWLOC_DISC_PHASE_IO);
@@ -123,7 +123,6 @@ hwloc_gl_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dstat
       osdev->name = strdup(name);
       osdev->subtype = strdup("Display");
       osdev->attr->osdev.type = HWLOC_OBJ_OSDEV_GPU;
-      hwloc_obj_add_info(osdev, "Backend", "GL");
       hwloc_obj_add_info(osdev, "GPUVendor", "NVIDIA Corporation");
       if (productname)
 	hwloc_obj_add_info(osdev, "GPUModel", productname);
@@ -133,6 +132,7 @@ hwloc_gl_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dstat
 	parent = hwloc_get_root_obj(topology);
 
       hwloc_insert_object_by_parent(topology, parent, osdev);
+      added++;
 
       hwloc_debug("GL device %s (product %s) on PCI %04x:%02x:%02x.%01x\n",
 		  name, productname,
@@ -141,6 +141,8 @@ hwloc_gl_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dstat
     XCloseDisplay(display);
   }
 
+  if (added)
+    hwloc_modify_infos(hwloc_topology_get_infos(topology), HWLOC_MODIFY_INFOS_OP_ADD, "Backend", "GL");
   return 0;
 }
 
@@ -154,7 +156,7 @@ hwloc_gl_component_instantiate(struct hwloc_topology *topology,
 {
   struct hwloc_backend *backend;
 
-  backend = hwloc_backend_alloc(topology, component);
+  backend = hwloc_backend_alloc(topology, component, 0);
   if (!backend)
     return NULL;
   backend->discover = hwloc_gl_discover;

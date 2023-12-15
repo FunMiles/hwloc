@@ -1,6 +1,6 @@
 /*
  * Copyright © 2009 CNRS
- * Copyright © 2009-2022 Inria.  All rights reserved.
+ * Copyright © 2009-2023 Inria.  All rights reserved.
  * Copyright © 2009-2012 Université Bordeaux
  * Copyright © 2009-2011 Cisco Systems, Inc.  All rights reserved.
  * See COPYING in top-level directory.
@@ -192,25 +192,28 @@ output_only (struct lstopo_output *loutput, hwloc_obj_t l)
 {
   FILE *output = loutput->file;
   hwloc_obj_t child;
-  if (loutput->show_only == l->type) {
-    output_console_obj (loutput, l, 0);
-    fprintf (output, "\n");
+  if (loutput->show_only.type == l->type
+      || loutput->show_only.depth == l->depth) {
+    if (!hwloc_calc_check_object_filtered(l, &loutput->show_only)) {
+      output_console_obj (loutput, l, 0);
+      fprintf (output, "\n");
+    }
   }
   /* there can be anything below normal children */
   for_each_child(child, l)
     output_only (loutput, child);
   /* there can be only memory or Misc below memory children */
-  if (hwloc_obj_type_is_memory(loutput->show_only) || loutput->show_only == HWLOC_OBJ_MISC) {
+  if (loutput->show_only.type == HWLOC_OBJ_TYPE_NONE || hwloc_obj_type_is_memory(loutput->show_only.type) || loutput->show_only.type == HWLOC_OBJ_MISC) {
     for(child = l->memory_first_child; child; child = child->next_sibling)
       output_only (loutput, child);
   }
   /* there can be only I/O or Misc below I/O children */
-  if (hwloc_obj_type_is_io(loutput->show_only) || loutput->show_only == HWLOC_OBJ_MISC) {
+  if (loutput->show_only.type == HWLOC_OBJ_TYPE_NONE || hwloc_obj_type_is_io(loutput->show_only.type) || loutput->show_only.type == HWLOC_OBJ_MISC) {
     for_each_io_child(child, l)
       output_only (loutput, child);
   }
   /* there can be only Misc below Misc children */
-  if (loutput->show_only == HWLOC_OBJ_MISC) {
+  if (loutput->show_only.type == HWLOC_OBJ_TYPE_NONE || loutput->show_only.type == HWLOC_OBJ_MISC) {
     /* Misc can only contain other Misc, no need to recurse otherwise */
     for_each_misc_child(child, l)
       output_only (loutput, child);
@@ -451,18 +454,17 @@ static void output_cpukinds(struct lstopo_output *loutput)
 
   for(i=0; i<nr; i++) {
     int efficiency;
-    struct hwloc_info_s *infos;
-    unsigned nr_infos;
+    struct hwloc_infos_s *infosp;
     int err;
 
-    err = hwloc_cpukinds_get_info(topology, i, cpuset, &efficiency, &nr_infos, &infos, 0);
+    err = hwloc_cpukinds_get_info(topology, i, cpuset, &efficiency, &infosp, 0);
     if (!err) {
       char *cpusets;
       hwloc_bitmap_asprintf(&cpusets, cpuset);
       printf("CPU kind #%u efficiency %d cpuset %s\n", i, efficiency, cpusets);
       free(cpusets);
-      for(j=0; j<nr_infos; j++)
-        printf("  %s = %s\n", infos[j].name, infos[j].value);
+      for(j=0; j<infosp->count; j++)
+        printf("  %s = %s\n", infosp->array[j].name, infosp->array[j].value);
     }
   }
 
@@ -506,30 +508,35 @@ output_console(struct lstopo_output *loutput, const char *filename)
    * if verbose_mode > 1, print both.
    */
 
-  if (loutput->show_only != HWLOC_OBJ_TYPE_NONE) {
-    if (verbose_mode > 1)
-      fprintf(output, "Only showing %s objects\n", hwloc_obj_type_string(loutput->show_only));
+  if (loutput->show_only.depth != HWLOC_TYPE_DEPTH_UNKNOWN) {
+    if (verbose_mode > 1) {
+      if (loutput->show_only.type != HWLOC_OBJ_TYPE_NONE)
+        fprintf(output, "Only showing some %s objects\n", hwloc_obj_type_string(loutput->show_only.type));
+      else
+        fprintf(output, "Only showing some objects at depth %d\n", loutput->show_only.depth);
+    }
     output_only (loutput, hwloc_get_root_obj(topology));
   } else if (verbose_mode >= 1) {
     output_topology (loutput, hwloc_get_root_obj(topology), NULL, 0);
     fprintf(output, "\n");
   }
 
-  if ((verbose_mode > 1 || !verbose_mode) && loutput->show_only == HWLOC_OBJ_TYPE_NONE) {
+  if ((verbose_mode > 1 || !verbose_mode) && loutput->show_only.depth == HWLOC_TYPE_DEPTH_UNKNOWN) {
     hwloc_lstopo_show_summary(output, topology);
   }
 
-  if (verbose_mode > 1 && loutput->show_only == HWLOC_OBJ_TYPE_NONE) {
+  if (verbose_mode > 1 && loutput->show_only.depth == HWLOC_TYPE_DEPTH_UNKNOWN) {
     output_distances(loutput);
     output_memattrs(loutput);
     output_cpukinds(loutput);
     output_windows_processor_groups(loutput, verbose_mode > 2);
   }
 
-  if (verbose_mode > 1 && loutput->show_only == HWLOC_OBJ_TYPE_NONE) {
+  if (verbose_mode > 1 && loutput->show_only.depth == HWLOC_TYPE_DEPTH_UNKNOWN) {
     hwloc_const_bitmap_t complete = hwloc_topology_get_complete_cpuset(topology);
     hwloc_const_bitmap_t topo = hwloc_topology_get_topology_cpuset(topology);
     hwloc_const_bitmap_t allowed = hwloc_topology_get_allowed_cpuset(topology);
+    struct hwloc_infos_s *infos = hwloc_topology_get_infos(topology);
 
     if (!hwloc_bitmap_isequal(topo, complete)) {
       hwloc_bitmap_t unknown = hwloc_bitmap_alloc();
@@ -550,6 +557,19 @@ output_console(struct lstopo_output *loutput, const char *filename)
       fprintf(output, "%d processors represented but not allowed: %s\n", hwloc_bitmap_weight(disallowed), disallowedstr);
       free(disallowedstr);
       hwloc_bitmap_free(disallowed);
+    }
+    if (infos->count) {
+      unsigned i;
+      fprintf(output, "Topology infos:");
+      for(i=0; i<infos->count; i++) {
+        const char *quote;
+        if (strchr(infos->array[i].value, ' '))
+          quote = "\"";
+        else
+          quote = "";
+        fprintf(output, " %s=%s%s%s", infos->array[i].name, quote, infos->array[i].value, quote);
+      }
+      fprintf(output, "\n");
     }
     if (!hwloc_topology_is_thissystem(topology))
       fprintf (output, "Topology not from this system\n");

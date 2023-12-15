@@ -1,5 +1,5 @@
 /*
- * Copyright © 2021 Inria.  All rights reserved.
+ * Copyright © 2021-2023 Inria.  All rights reserved.
  * See COPYING in top-level directory.
  */
 
@@ -9,10 +9,22 @@
 #include <level_zero/ze_api.h>
 #include <level_zero/zes_api.h>
 
+#include "private/autogen/config.h" /* for HWLOC_HAVE_ZESINIT */
 #include "hwloc.h"
 #include "hwloc/levelzero.h"
 
 /* check the RSMI helpers */
+
+static int check_levelzero_backend(hwloc_topology_t topology)
+{
+  struct hwloc_infos_s *infos = hwloc_topology_get_infos(topology);
+  unsigned i;
+  for(i=0; i<infos->count; i++)
+    if (!strcmp(infos->array[i].name, "Backend")
+        && !strcmp(infos->array[i].value, "LevelZero"))
+      return 1;
+  return 0;
+}
 
 int main(void)
 {
@@ -20,19 +32,30 @@ int main(void)
   ze_driver_handle_t *drh;
   uint32_t nbdrivers, i, k;
   ze_result_t res;
+  int has_levelzero_backend;
   int err = 0;
+
+#ifdef HWLOC_HAVE_ZESINIT
+  res = zesInit(0);
+  if (res != ZE_RESULT_SUCCESS) {
+    fprintf(stderr, "Failed to initialize LevelZero Sysman in zesInit(): %d\n", (int)res);
+    /* continuing, assuming ZES_ENABLE_SYSMAN=1 will be enough */
+  }
+#endif
 
   putenv((char *) "ZES_ENABLE_SYSMAN=1");
 
   res = zeInit(0);
   if (res != ZE_RESULT_SUCCESS) {
-    fprintf(stderr, "Failed to initialize LevelZero in ze_init(): %d\n", (int)res);
+    fprintf(stderr, "Failed to initialize LevelZero in zeInit(): %d\n", (int)res);
     return 0;
   }
   
   hwloc_topology_init(&topology);
   hwloc_topology_set_io_types_filter(topology, HWLOC_TYPE_FILTER_KEEP_IMPORTANT);
   hwloc_topology_load(topology);
+
+  has_levelzero_backend = check_levelzero_backend(topology);
 
   nbdrivers = 0;
   res = zeDriverGet(&nbdrivers, NULL);
@@ -84,11 +107,9 @@ int main(void)
       assert(!err);
       assert(atoi(osdev->name+2) == (int) k);
 
-      assert(osdev->attr->osdev.type == HWLOC_OBJ_OSDEV_COPROC);
+      assert(osdev->attr->osdev.type == (HWLOC_OBJ_OSDEV_COPROC|HWLOC_OBJ_OSDEV_GPU));
 
-      value = hwloc_obj_get_info_by_name(osdev, "Backend");
-      err = strcmp(value, "LevelZero");
-      assert(!err);
+      assert(has_levelzero_backend);
 
       value = hwloc_obj_get_info_by_name(osdev, "LevelZeroDriverIndex");
       assert(value);

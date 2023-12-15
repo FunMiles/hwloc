@@ -1,0 +1,4 @@
+# Keep all I/O
+source:  32em64t-2n8c2t-pci-wholeio.xml
+target:  32em64t-2n8c2t-pci-wholeio.xml
+options: --whole-io

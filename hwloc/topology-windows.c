@@ -1,6 +1,6 @@
 /*
  * Copyright © 2009 CNRS
- * Copyright © 2009-2022 Inria.  All rights reserved.
+ * Copyright © 2009-2023 Inria.  All rights reserved.
  * Copyright © 2009-2012, 2020 Université Bordeaux
  * Copyright © 2011 Cisco Systems, Inc.  All rights reserved.
  * See COPYING in top-level directory.
@@ -367,7 +367,7 @@ hwloc_win_get_processor_groups(void)
 
   if (nr_processor_groups > 1 && SIZEOF_VOID_P == 4) {
     if (HWLOC_SHOW_ALL_ERRORS())
-      fprintf(stderr, "hwloc: multiple processor groups found on 32bits Windows, topology may be invalid/incomplete.\n");
+      fprintf(stderr, "hwloc/windows: multiple processor groups found on 32bits Windows, topology may be invalid/incomplete.\n");
   }
 
   length = 0;
@@ -953,7 +953,7 @@ hwloc_win_efficiency_classes_register(hwloc_topology_t topology,
 {
   unsigned i;
   for(i=0; i<classes->nr_classes; i++) {
-    hwloc_internal_cpukinds_register(topology, classes->classes[i].cpuset, classes->classes[i].value, NULL, 0, 0);
+    hwloc_internal_cpukinds_register(topology, classes->classes[i].cpuset, classes->classes[i].value, NULL, 0);
     classes->classes[i].cpuset = NULL; /* given to cpukinds */
   }
 }
@@ -989,7 +989,11 @@ hwloc_look_windows(struct hwloc_backend *backend, struct hwloc_disc_status *dsta
   OSVERSIONINFOEX osvi;
   char versionstr[20];
   char hostname[122] = "";
-  unsigned hostname_size = sizeof(hostname);
+#if !defined(__CYGWIN__)
+  DWORD hostname_size = sizeof(hostname);
+#else
+  size_t hostname_size = sizeof(hostname);
+#endif
   int has_efficiencyclass = 0;
   struct hwloc_win_efficiency_classes eclasses;
   char *env = getenv("HWLOC_WINDOWS_PROCESSOR_GROUP_OBJS");
@@ -1053,12 +1057,16 @@ hwloc_look_windows(struct hwloc_backend *backend, struct hwloc_disc_status *dsta
         unsigned efficiency_class = 0;
         GROUP_AFFINITY *GroupMask;
 
-        /* Ignore unknown caches */
-	if (procInfo->Relationship == RelationCache
-		&& procInfo->Cache.Type != CacheUnified
-		&& procInfo->Cache.Type != CacheData
-		&& procInfo->Cache.Type != CacheInstruction)
-	  continue;
+	if (procInfo->Relationship == RelationCache) {
+          if (!topology->want_some_cpu_caches)
+            /* TODO: check if RelationAll&~RelationCache works? */
+            continue;
+          if (procInfo->Cache.Type != CacheUnified
+              && procInfo->Cache.Type != CacheData
+              && procInfo->Cache.Type != CacheInstruction)
+            /* Ignore unknown caches */
+            continue;
+        }
 
 	id = HWLOC_UNKNOWN_INDEX;
 	switch (procInfo->Relationship) {
@@ -1257,32 +1265,32 @@ hwloc_look_windows(struct hwloc_backend *backend, struct hwloc_disc_status *dsta
     hwloc_win_efficiency_classes_destroy(&eclasses);
 
   /* emulate uname instead of calling hwloc_add_uname_info() */
-  hwloc_obj_add_info(topology->levels[0][0], "Backend", "Windows");
-  hwloc_obj_add_info(topology->levels[0][0], "OSName", "Windows");
+  hwloc__add_info(&topology->infos, "Backend", "Windows");
+  hwloc__add_info(&topology->infos, "OSName", "Windows");
 
 #if defined(__CYGWIN__)
-  hwloc_obj_add_info(topology->levels[0][0], "WindowsBuildEnvironment", "Cygwin");
+  hwloc__add_info(&topology->infos, "WindowsBuildEnvironment", "Cygwin");
 #elif defined(__MINGW32__)
-  hwloc_obj_add_info(topology->levels[0][0], "WindowsBuildEnvironment", "MinGW");
+  hwloc__add_info(&topology->infos, "WindowsBuildEnvironment", "MinGW");
 #endif
 
   /* see https://docs.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-osversioninfoexa */
   if (osvi.dwMajorVersion == 10) {
     if (osvi.dwMinorVersion == 0)
-      hwloc_obj_add_info(topology->levels[0][0], "OSRelease", "10");
+      hwloc__add_info(&topology->infos, "OSRelease", "10");
   } else if (osvi.dwMajorVersion == 6) {
     if (osvi.dwMinorVersion == 3)
-      hwloc_obj_add_info(topology->levels[0][0], "OSRelease", "8.1"); /* or "Server 2012 R2" */
+      hwloc__add_info(&topology->infos, "OSRelease", "8.1"); /* or "Server 2012 R2" */
     else if (osvi.dwMinorVersion == 2)
-      hwloc_obj_add_info(topology->levels[0][0], "OSRelease", "8"); /* or "Server 2012" */
+      hwloc__add_info(&topology->infos, "OSRelease", "8"); /* or "Server 2012" */
     else if (osvi.dwMinorVersion == 1)
-      hwloc_obj_add_info(topology->levels[0][0], "OSRelease", "7"); /* or "Server 2008 R2" */
+      hwloc__add_info(&topology->infos, "OSRelease", "7"); /* or "Server 2008 R2" */
     else if (osvi.dwMinorVersion == 0)
-      hwloc_obj_add_info(topology->levels[0][0], "OSRelease", "Vista"); /* or "Server 2008" */
+      hwloc__add_info(&topology->infos, "OSRelease", "Vista"); /* or "Server 2008" */
   } /* earlier versions are ignored */
 
   snprintf(versionstr, sizeof(versionstr), "%u.%u.%u", osvi.dwMajorVersion, osvi.dwMinorVersion, osvi.dwBuildNumber);
-  hwloc_obj_add_info(topology->levels[0][0], "OSVersion", versionstr);
+  hwloc__add_info(&topology->infos, "OSVersion", versionstr);
 
 #if !defined(__CYGWIN__)
   GetComputerName(hostname, &hostname_size);
@@ -1290,24 +1298,24 @@ hwloc_look_windows(struct hwloc_backend *backend, struct hwloc_disc_status *dsta
   gethostname(hostname, hostname_size);
 #endif
   if (*hostname)
-    hwloc_obj_add_info(topology->levels[0][0], "Hostname", hostname);
+    hwloc__add_info(&topology->infos, "Hostname", hostname);
 
   /* convert to unix-like architecture strings */
   switch (SystemInfo.wProcessorArchitecture) {
   case 0:
-    hwloc_obj_add_info(topology->levels[0][0], "Architecture", "i686");
+    hwloc__add_info(&topology->infos, "Architecture", "i686");
     break;
   case 9:
-    hwloc_obj_add_info(topology->levels[0][0], "Architecture", "x86_64");
+    hwloc__add_info(&topology->infos, "Architecture", "x86_64");
     break;
   case 5:
-    hwloc_obj_add_info(topology->levels[0][0], "Architecture", "arm");
+    hwloc__add_info(&topology->infos, "Architecture", "arm");
     break;
   case 12:
-    hwloc_obj_add_info(topology->levels[0][0], "Architecture", "arm64");
+    hwloc__add_info(&topology->infos, "Architecture", "arm64");
     break;
   case 6:
-    hwloc_obj_add_info(topology->levels[0][0], "Architecture", "ia64");
+    hwloc__add_info(&topology->infos, "Architecture", "ia64");
     break;
   }
 
@@ -1374,7 +1382,7 @@ hwloc_windows_component_instantiate(struct hwloc_topology *topology,
 				    const void *_data3 __hwloc_attribute_unused)
 {
   struct hwloc_backend *backend;
-  backend = hwloc_backend_alloc(topology, component);
+  backend = hwloc_backend_alloc(topology, component, 0);
   if (!backend)
     return NULL;
   backend->discover = hwloc_look_windows;

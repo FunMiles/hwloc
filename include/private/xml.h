@@ -19,13 +19,14 @@ HWLOC_DECLSPEC int hwloc__xml_verbose(void);
 typedef struct hwloc__xml_import_state_s {
   struct hwloc__xml_import_state_s *parent;
 
-  /* globals shared because the entire stack of states during import */
+  /* globals shared between the entire stack of states during import */
   struct hwloc_xml_backend_data_s *global;
 
   /* opaque data used to store backend-specific data.
    * statically allocated to allow stack-allocation by the common code without knowing actual backend needs.
+   * libxml is 3 ptrs. nolibxml is 3 ptr + one int.
    */
-  char data[32];
+  char data[4 * SIZEOF_VOID_P];
 } * hwloc__xml_import_state_t;
 
 HWLOC_DECLSPEC int hwloc__xml_import_diff(hwloc__xml_import_state_t state, hwloc_topology_diff_t *firstdiffp);
@@ -44,7 +45,7 @@ struct hwloc_xml_backend_data_s {
   char * msgprefix;
   void *data; /* libxml2 doc, or nolibxml buffer */
   unsigned version_major, version_minor;
-  unsigned nbnumanodes;
+  unsigned char need_cuda_backend_info, need_nvml_backend_info, need_rsmi_backend_info, need_levelzero_backend_info, need_opencl_backend_info, need_gl_backend_info;
 };
 
 /**************
@@ -65,8 +66,9 @@ typedef struct hwloc__xml_export_state_s {
 
   /* opaque data used to store backend-specific data.
    * statically allocated to allow stack-allocation by the common code without knowing actual backend needs.
+   * libxml is 1 ptr. nolibxml is 1 ptr + 2 size_t + 3 ints.
    */
-  char data[40];
+  char data[6 * SIZEOF_VOID_P];
 } * hwloc__xml_export_state_t;
 
 HWLOC_DECLSPEC void hwloc__xml_export_topology(hwloc__xml_export_state_t parentstate, hwloc_topology_t topology, unsigned long flags);

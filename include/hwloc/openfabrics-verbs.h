@@ -1,6 +1,6 @@
 /*
  * Copyright © 2009 CNRS
- * Copyright © 2009-2021 Inria.  All rights reserved.
+ * Copyright © 2009-2023 Inria.  All rights reserved.
  * Copyright © 2009-2010 Université Bordeaux
  * Copyright © 2009-2011 Cisco Systems, Inc.  All rights reserved.
  * See COPYING in top-level directory.
@@ -57,6 +57,9 @@ extern "C" {
  *
  * This function is currently only implemented in a meaningful way for
  * Linux; other systems will simply get a full cpuset.
+ *
+ * \return 0 on success.
+ * \return -1 on error, for instance if device information could not be found.
  */
 static __hwloc_inline int
 hwloc_ibv_get_device_cpuset(hwloc_topology_t topology __hwloc_attribute_unused,
@@ -108,7 +111,7 @@ hwloc_ibv_get_device_osdev_by_name(hwloc_topology_t topology,
 {
 	hwloc_obj_t osdev = NULL;
 	while ((osdev = hwloc_get_next_osdev(topology, osdev)) != NULL) {
-		if (HWLOC_OBJ_OSDEV_OPENFABRICS == osdev->attr->osdev.type
+          if ((osdev->attr->osdev.type & HWLOC_OBJ_OSDEV_OPENFABRICS) /* assume future OFED devices will be at least OFED */
 		    && osdev->name && !strcmp(ibname, osdev->name))
 			return osdev;
 	}

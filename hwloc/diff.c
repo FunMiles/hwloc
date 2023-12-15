@@ -1,5 +1,5 @@
 /*
- * Copyright © 2013-2022 Inria.  All rights reserved.
+ * Copyright © 2013-2023 Inria.  All rights reserved.
  * See COPYING in top-level directory.
  */
 
@@ -66,7 +66,8 @@ static int hwloc_append_diff_too_complex(hwloc_obj_t obj1,
 	return 0;
 }
 
-static int hwloc_append_diff_obj_attr_string(hwloc_obj_t obj,
+static int hwloc_append_diff_obj_attr_string(hwloc_topology_t topology,
+                                             hwloc_obj_t obj,
 					     hwloc_topology_diff_obj_attr_type_t type,
 					     const char *name,
 					     const char *oldvalue,
@@ -80,8 +81,8 @@ static int hwloc_append_diff_obj_attr_string(hwloc_obj_t obj,
 		return -1;
 
 	newdiff->obj_attr.type = HWLOC_TOPOLOGY_DIFF_OBJ_ATTR;
-	newdiff->obj_attr.obj_depth = obj->depth;
-	newdiff->obj_attr.obj_index = obj->logical_index;
+	newdiff->obj_attr.obj_depth = obj ? obj->depth : (int) topology->nb_levels;
+	newdiff->obj_attr.obj_index = obj ? obj->logical_index : 0;
 	newdiff->obj_attr.diff.string.type = type;
 	newdiff->obj_attr.diff.string.name = name ? strdup(name) : NULL;
 	newdiff->obj_attr.diff.string.oldvalue = oldvalue ? strdup(oldvalue) : NULL;
@@ -155,7 +156,7 @@ hwloc_diff_trees(hwloc_topology_t topo1, hwloc_obj_t obj1,
 
 	if ((!obj1->name) != (!obj2->name)
 	    || (obj1->name && strcmp(obj1->name, obj2->name))) {
-		err = hwloc_append_diff_obj_attr_string(obj1,
+                err = hwloc_append_diff_obj_attr_string(topo1, obj1,
 						       HWLOC_TOPOLOGY_DIFF_OBJ_ATTR_NAME,
 						       NULL,
 						       obj1->name,
@@ -212,14 +213,14 @@ hwloc_diff_trees(hwloc_topology_t topo1, hwloc_obj_t obj1,
 	}
 
 	/* infos */
-	if (obj1->infos_count != obj2->infos_count)
+	if (obj1->infos.count != obj2->infos.count)
 		goto out_too_complex;
-	for(i=0; i<obj1->infos_count; i++) {
-		struct hwloc_info_s *info1 = &obj1->infos[i], *info2 = &obj2->infos[i];
+	for(i=0; i<obj1->infos.count; i++) {
+		struct hwloc_info_s *info1 = &obj1->infos.array[i], *info2 = &obj2->infos.array[i];
 		if (strcmp(info1->name, info2->name))
 			goto out_too_complex;
 		if (strcmp(info1->value, info2->value)) {
-			err = hwloc_append_diff_obj_attr_string(obj1,
+                        err = hwloc_append_diff_obj_attr_string(topo1, obj1,
 								HWLOC_TOPOLOGY_DIFF_OBJ_ATTR_INFO,
 								info1->name,
 								info1->value,
@@ -338,6 +339,27 @@ int hwloc_topology_diff_build(hwloc_topology_t topo1,
                   goto roottoocomplex;
 	}
 
+        /* topology infos */
+        if (!err) {
+          if (topo1->infos.count != topo2->infos.count)
+            goto roottoocomplex;
+          for(i=0; i<topo1->infos.count; i++) {
+            struct hwloc_info_s *info1 = &topo1->infos.array[i], *info2 = &topo2->infos.array[i];
+            if (strcmp(info1->name, info2->name))
+              goto roottoocomplex;
+            if (strcmp(info1->value, info2->value)) {
+              err = hwloc_append_diff_obj_attr_string(topo1, NULL,
+                                                      HWLOC_TOPOLOGY_DIFF_OBJ_ATTR_INFO,
+                                                      info1->name,
+                                                      info1->value,
+                                                      info2->value,
+                                                      diffp, &lastdiff);
+              if (err < 0)
+                return err;
+            }
+          }
+	}
+
 	if (!err) {
 		/* distances */
 		hwloc_internal_distances_refresh(topo1);
@@ -412,6 +434,30 @@ int hwloc_topology_diff_build(hwloc_topology_t topo1,
           }
         }
 
+        if (!err) {
+          /* cpukinds */
+          if (topo1->nr_cpukinds != topo2->nr_cpukinds)
+            goto roottoocomplex;
+          for(i=0; i<topo1->nr_cpukinds; i++) {
+            struct hwloc_internal_cpukind_s *ic1 = &topo1->cpukinds[i];
+            struct hwloc_internal_cpukind_s *ic2 = &topo2->cpukinds[i];
+            unsigned j;
+            if (!hwloc_bitmap_isequal(ic1->cpuset, ic2->cpuset)
+                || ic1->efficiency != ic2->efficiency
+                || ic1->forced_efficiency != ic2->forced_efficiency
+                || ic1->ranking_value != ic2->ranking_value
+                || ic1->infos.count != ic2->infos.count)
+              goto roottoocomplex;
+            for(j=0; j<ic1->infos.count; j++) {
+              struct hwloc_info_s *info1 = &ic1->infos.array[j], *info2 = &ic2->infos.array[j];
+              if (strcmp(info1->name, info2->name)
+                  || strcmp(info1->value, info2->value)) {
+                goto roottoocomplex;
+              }
+            }
+          }
+        }
+
 	return err;
 
  roottoocomplex:
@@ -434,8 +480,13 @@ hwloc_apply_diff_one(hwloc_topology_t topology,
 	case HWLOC_TOPOLOGY_DIFF_OBJ_ATTR: {
 		struct hwloc_topology_diff_obj_attr_s *obj_attr = &diff->obj_attr;
 		hwloc_obj_t obj = hwloc_get_obj_by_depth(topology, obj_attr->obj_depth, obj_attr->obj_index);
-		if (!obj)
-			return -1;
+                struct hwloc_infos_s *infos;
+                if (obj)
+                  infos = &obj->infos;
+                else if (obj_attr->obj_depth == (int) topology->nb_levels)
+                  infos = &topology->infos;
+                else
+                  return -1;
 
 		switch (obj_attr->diff.generic.type) {
 		case HWLOC_TOPOLOGY_DIFF_OBJ_ATTR_SIZE: {
@@ -443,6 +494,8 @@ hwloc_apply_diff_one(hwloc_topology_t topology,
 			hwloc_uint64_t oldvalue = reverse ? obj_attr->diff.uint64.newvalue : obj_attr->diff.uint64.oldvalue;
 			hwloc_uint64_t newvalue = reverse ? obj_attr->diff.uint64.oldvalue : obj_attr->diff.uint64.newvalue;
 			hwloc_uint64_t valuediff = newvalue - oldvalue;
+                        if (!obj)
+                          return -1;
 			if (obj->type != HWLOC_OBJ_NUMANODE)
 				return -1;
 			if (obj->attr->numanode.local_memory != oldvalue)
@@ -458,7 +511,9 @@ hwloc_apply_diff_one(hwloc_topology_t topology,
 		case HWLOC_TOPOLOGY_DIFF_OBJ_ATTR_NAME: {
 			const char *oldvalue = reverse ? obj_attr->diff.string.newvalue : obj_attr->diff.string.oldvalue;
 			const char *newvalue = reverse ? obj_attr->diff.string.oldvalue : obj_attr->diff.string.newvalue;
-			if (!obj->name || strcmp(obj->name, oldvalue))
+                        if (!obj)
+                          return -1;
+                        if (!obj->name || strcmp(obj->name, oldvalue))
 				return -1;
 			free(obj->name);
 			obj->name = strdup(newvalue);
@@ -470,8 +525,8 @@ hwloc_apply_diff_one(hwloc_topology_t topology,
 			const char *newvalue = reverse ? obj_attr->diff.string.oldvalue : obj_attr->diff.string.newvalue;
 			unsigned i;
 			int found = 0;
-			for(i=0; i<obj->infos_count; i++) {
-				struct hwloc_info_s *info = &obj->infos[i];
+			for(i=0; i<infos->count; i++) {
+				struct hwloc_info_s *info = &infos->array[i];
 				if (!strcmp(info->name, name)
 				    && !strcmp(info->value, oldvalue)) {
 					free(info->value);

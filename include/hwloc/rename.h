@@ -84,12 +84,13 @@ extern "C" {
 
 #define hwloc_obj_osdev_type_e HWLOC_NAME(obj_osdev_type_e)
 #define hwloc_obj_osdev_type_t HWLOC_NAME(obj_osdev_type_t)
-#define HWLOC_OBJ_OSDEV_BLOCK HWLOC_NAME_CAPS(OBJ_OSDEV_BLOCK)
+#define HWLOC_OBJ_OSDEV_STORAGE HWLOC_NAME_CAPS(OBJ_OSDEV_STORAGE)
 #define HWLOC_OBJ_OSDEV_GPU HWLOC_NAME_CAPS(OBJ_OSDEV_GPU)
 #define HWLOC_OBJ_OSDEV_NETWORK HWLOC_NAME_CAPS(OBJ_OSDEV_NETWORK)
 #define HWLOC_OBJ_OSDEV_OPENFABRICS HWLOC_NAME_CAPS(OBJ_OSDEV_OPENFABRICS)
 #define HWLOC_OBJ_OSDEV_DMA HWLOC_NAME_CAPS(OBJ_OSDEV_DMA)
 #define HWLOC_OBJ_OSDEV_COPROC HWLOC_NAME_CAPS(OBJ_OSDEV_COPROC)
+#define HWLOC_OBJ_OSDEV_MEMORY HWLOC_NAME_CAPS(OBJ_OSDEV_MEMORY)
 
 #define hwloc_compare_types HWLOC_NAME(compare_types)
 
@@ -97,6 +98,7 @@ extern "C" {
 #define hwloc_obj_t HWLOC_NAME(obj_t)
 
 #define hwloc_info_s HWLOC_NAME(info_s)
+#define hwloc_infos_s HWLOC_NAME(infos_s)
 
 #define hwloc_obj_attr_u HWLOC_NAME(obj_attr_u)
 #define hwloc_numanode_attr_s HWLOC_NAME(numanode_attr_s)
@@ -176,6 +178,7 @@ extern "C" {
 
 #define hwloc_topology_insert_misc_object HWLOC_NAME(topology_insert_misc_object)
 #define hwloc_topology_alloc_group_object HWLOC_NAME(topology_alloc_group_object)
+#define hwloc_topology_free_group_object HWLOC_NAME(topology_free_group_object)
 #define hwloc_topology_insert_group_object HWLOC_NAME(topology_insert_group_object)
 #define hwloc_obj_add_other_obj_sets HWLOC_NAME(obj_add_other_obj_sets)
 #define hwloc_topology_refresh HWLOC_NAME(topology_refresh)
@@ -207,6 +210,7 @@ extern "C" {
 #define hwloc_obj_attr_snprintf HWLOC_NAME(obj_attr_snprintf )
 #define hwloc_obj_snprintf_flag_e HWLOC_NAME(obj_snprintf_flag_e)
 #define HWLOC_OBJ_SNPRINTF_FLAG_LONG_NAMES HWLOC_NAME_CAPS(OBJ_SNPRINTF_FLAG_LONG_NAMES)
+#define HWLOC_OBJ_SNPRINTF_FLAG_SHORT_NAMES HWLOC_NAME_CAPS(OBJ_SNPRINTF_FLAG_SHORT_NAMES)
 #define HWLOC_OBJ_SNPRINTF_FLAG_MORE_ATTRS HWLOC_NAME_CAPS(OBJ_SNPRINTF_FLAG_MORE_ATTRS)
 #define HWLOC_OBJ_SNPRINTF_FLAG_NO_UNITS HWLOC_NAME_CAPS(OBJ_SNPRINTF_FLAG_NO_UNITS)
 #define HWLOC_OBJ_SNPRINTF_FLAG_UNITS_1000 HWLOC_NAME_CAPS(OBJ_SNPRINTF_FLAG_UNITS_1000)
@@ -214,7 +218,15 @@ extern "C" {
 #define hwloc_type_sscanf HWLOC_NAME(type_sscanf)
 
 #define hwloc_obj_get_info_by_name HWLOC_NAME(obj_get_info_by_name)
+#define hwloc_get_info_by_name HWLOC_NAME(get_info_by_name)
 #define hwloc_obj_add_info HWLOC_NAME(obj_add_info)
+#define hwloc_modify_infos HWLOC_NAME(modify_infos)
+#define hwloc_modify_infos_op_e HWLOC_NAME(modify_infos_op_e)
+#define HWLOC_MODIFY_INFOS_OP_ADD HWLOC_NAME_CAPS(MODIFY_INFOS_OP_ADD)
+#define HWLOC_MODIFY_INFOS_OP_ADD_UNIQUE HWLOC_NAME_CAPS(MODIFY_INFOS_OP_ADD_UNIQUE)
+#define HWLOC_MODIFY_INFOS_OP_REPLACE HWLOC_NAME_CAPS(MODIFY_INFOS_OP_REPLACE)
+#define HWLOC_MODIFY_INFOS_OP_REMOVE HWLOC_NAME_CAPS(MODIFY_INFOS_OP_REMOVE)
+#define hwloc_topology_get_infos HWLOC_NAME(topology_get_infos)
 
 #define HWLOC_CPUBIND_PROCESS HWLOC_NAME_CAPS(CPUBIND_PROCESS)
 #define HWLOC_CPUBIND_THREAD HWLOC_NAME_CAPS(CPUBIND_THREAD)
@@ -565,6 +577,7 @@ extern "C" {
 
 /* opencl.h */
 
+#define hwloc_cl_device_pci_bus_info_khr HWLOC_NAME(cl_device_pci_bus_info_khr)
 #define hwloc_cl_device_topology_amd HWLOC_NAME(cl_device_topology_amd)
 #define hwloc_opencl_get_device_pci_busid HWLOC_NAME(opencl_get_device_pci_ids)
 #define hwloc_opencl_get_device_cpuset HWLOC_NAME(opencl_get_device_cpuset)
@@ -824,7 +837,7 @@ extern "C" {
 #define hwloc_find_insert_io_parent_by_complete_cpuset HWLOC_NAME(hwloc_find_insert_io_parent_by_complete_cpuset)
 
 #define hwloc__add_info HWLOC_NAME(_add_info)
-#define hwloc__add_info_nodup HWLOC_NAME(_add_info_nodup)
+#define hwloc__replace_infos HWLOC_NAME(_replace_infos)
 #define hwloc__move_infos HWLOC_NAME(_move_infos)
 #define hwloc__free_infos HWLOC_NAME(_free_infos)
 #define hwloc__tma_dup_infos HWLOC_NAME(_tma_dup_infos)

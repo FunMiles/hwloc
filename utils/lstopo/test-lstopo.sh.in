@@ -123,26 +123,24 @@ echo "**** Import from synthetic so that we can check some exact outputs in $fil
   echo "** Export synthetic flag extended,attrs,v1..."
   $ls -i "node:4 pu:4" -.synthetic --export-synthetic-flags extended,attrs,v1
   echo "** Export XML flag v2..."
-  $ls -i "node:4 pu:4" -.xml --export-xml-flags v2
+  $ls -i "node:4 pu:4" -.v2xml
   echo "** Topology flag disallowed..."
   $ls -i "node:4 pu:4" - --allow 0xf --flags disallowed -v
 ) > "$file"
 @DIFF@ @HWLOC_DIFF_U@ @HWLOC_DIFF_W@ $srcdir/test-lstopo.output "$file"
 
-if test x@ARCHIVEMOUNT@ != x; then
-  if test x@HWLOC_HAVE_LINUX@ = x1; then
-    echo "**** Archivemount'ing a Linux fsroot archive ..."
-    file="$tmp/test-lstopo.archivemount.fsroot.output"
-    $ls -i $HWLOC_top_srcdir/tests/hwloc/linux/16amd64-8n2c.tar.bz2 -v - | egrep -v "^assuming " > "$file"
-    @DIFF@ @HWLOC_DIFF_U@ @HWLOC_DIFF_W@ $HWLOC_top_srcdir/tests/hwloc/linux/16amd64-8n2c.output "$file"
-  fi
+if which archivemount >/dev/null 2>/dev/null && test x@HWLOC_HAVE_LINUX@ = x1; then
+  echo "**** Archivemount'ing a Linux fsroot archive ..."
+  file="$tmp/test-lstopo.archivemount.fsroot.output"
+  $ls -i $HWLOC_top_srcdir/tests/hwloc/linux/16amd64-8n2c.tar.bz2 -v - | egrep -v "^assuming " > "$file"
+  @DIFF@ @HWLOC_DIFF_U@ @HWLOC_DIFF_W@ $HWLOC_top_srcdir/tests/hwloc/linux/16amd64-8n2c.console "$file"
   if test x@HWLOC_HAVE_X86_CPUID@ = x1; then
     echo "**** Archivemount'ing a x86 CPUID archive ..."
     file="$tmp/test-lstopo.archivemount.cpuid.output"
     HWLOC_XML_EXPORT_SUPPORT=0
     export HWLOC_XML_EXPORT_SUPPORT
     $ls -i $HWLOC_top_srcdir/tests/hwloc/x86/Intel-Skylake-2xXeon6140.tar.bz2 --of xml - | sed   -e 's/ gp_index="[0-9]*"//' | sed   -e 's/ id="obj[0-9]*"//'| egrep -v "^assuming " > "$file"
-    @DIFF@ @HWLOC_DIFF_U@ @HWLOC_DIFF_W@ $HWLOC_top_srcdir/tests/hwloc/x86/Intel-Skylake-2xXeon6140.output "$file"
+    @DIFF@ @HWLOC_DIFF_U@ @HWLOC_DIFF_W@ $HWLOC_top_srcdir/tests/hwloc/x86/Intel-Skylake-2xXeon6140.xml "$file"
   fi
 fi
 

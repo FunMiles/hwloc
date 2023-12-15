@@ -1,0 +1,3 @@
+# Many custom memattrs and values
+source:  8intel64-4n2t-memattrs.xml
+target:  8intel64-4n2t-memattrs.xml

@@ -31,7 +31,7 @@ Verbose messages.
 \fB\-i\fR <path>, \fB\-\-input\fR <path>
 Read the topology from <path> instead of discovering the topology of the local machine.
 
-If <path> is a file and XML support has been compiled in hwloc,
+If <path> is a file,
 it may be a XML file exported by a previous hwloc program.
 If <path> is "\-", the standard input may be used as a XML file.
 
@@ -83,9 +83,18 @@ and singlify CPU sets by keeping the last bit (instead of the first bit).
 .TP
 \fB\-\-restrict\fR <cpuset>
 Restrict the topology to the given cpuset.
+This removes some PUs and their now-child-less parents.
+
+Beware that restricting the PUs in a topology may change the
+logical indexes of many objects, including NUMA nodes.
 .TP
 \fB\-\-restrict\fR nodeset=<nodeset>
-Restrict the topology to the given nodeset, unless \fB\-\-restrict\-flags\fR specifies something different.
+Restrict the topology to the given nodeset
+(unless \fB\-\-restrict\-flags\fR specifies something different).
+This removes some NUMA nodes and their now-child-less parents.
+
+Beware that restricting the NUMA nodes in a topology may change the
+logical indexes of many objects, including PUs.
 .TP
 \fB\-\-restrict\-flags\fR <flags>
 Enforce flags when restricting the topology.

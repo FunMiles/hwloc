@@ -1,6 +1,6 @@
 /*
  * Copyright © 2009 CNRS
- * Copyright © 2009-2020 Inria.  All rights reserved.
+ * Copyright © 2009-2023 Inria.  All rights reserved.
  * Copyright © 2009-2010, 2013 Université Bordeaux
  * Copyright © 2011 Cisco Systems, Inc.  All rights reserved.
  * See COPYING in top-level directory.
@@ -271,7 +271,7 @@ hwloc_look_hpux(struct hwloc_backend *backend, struct hwloc_disc_status *dstatus
     topology->support.discovery->numa = 1;
   /* don't set disallowed_{pu,numa} since we don't set the allowed sets */
 
-  hwloc_obj_add_info(topology->levels[0][0], "Backend", "HP-UX");
+  hwloc__add_info(&topology->infos, "Backend", "HP-UX");
   hwloc_add_uname_info(topology, NULL);
 
   free(nodes);
@@ -307,7 +307,7 @@ hwloc_hpux_component_instantiate(struct hwloc_topology *topology,
 				 const void *_data3 __hwloc_attribute_unused)
 {
   struct hwloc_backend *backend;
-  backend = hwloc_backend_alloc(topology, component);
+  backend = hwloc_backend_alloc(topology, component, 0);
   if (!backend)
     return NULL;
   backend->discover = hwloc_look_hpux;

@@ -1,6 +1,6 @@
 /*
  * Copyright © 2009 CNRS
- * Copyright © 2009-2019 Inria.  All rights reserved.
+ * Copyright © 2009-2023 Inria.  All rights reserved.
  * Copyright © 2009-2012, 2020 Université Bordeaux
  * Copyright © 2009-2011 Cisco Systems, Inc.  All rights reserved.
  * See COPYING in top-level directory.
@@ -35,6 +35,7 @@ hwloc_look_noos(struct hwloc_backend *backend, struct hwloc_disc_status *dstatus
       nbprocs = 1;
     hwloc_alloc_root_sets(topology->levels[0][0]);
     hwloc_setup_pu_level(topology, nbprocs);
+    hwloc__add_info(&topology->infos, "Backend", "noOS");
   }
 
   memsize = hwloc_fallback_memsize();
@@ -54,7 +55,7 @@ hwloc_noos_component_instantiate(struct hwloc_topology *topology,
 				 const void *_data3 __hwloc_attribute_unused)
 {
   struct hwloc_backend *backend;
-  backend = hwloc_backend_alloc(topology, component);
+  backend = hwloc_backend_alloc(topology, component, 0);
   if (!backend)
     return NULL;
   backend->discover = hwloc_look_noos;

@@ -1,5 +1,5 @@
 .\" -*- nroff -*-
-.\" Copyright © 2010-2022 Inria.  All rights reserved.
+.\" Copyright © 2010-2023 Inria.  All rights reserved.
 .\" Copyright © 2009-2020 Cisco Systems, Inc.  All rights reserved.
 .\" See COPYING in top-level directory.
 .TH HWLOC-CALC "1" "%HWLOC_DATE%" "%PACKAGE_VERSION%" "%PACKAGE_NAME%"
@@ -31,23 +31,52 @@ All topology options must be given before all other options.
 Only keep the first PU per core in the input locations.
 If \fI<N>\fR is specified, keep the <N>-th instead, if any.
 PUs are ordered by physical index during this filtering.
+
+Note that this option is applied after searching locations.
+Hence \fB\-\-no\-smt pu:2-5\fR will first select the PUs #2
+to #5 in the machine before keeping one of them per core.
+To rather get PUs #2 to #5 after filtering one per core,
+you should combine invocations:
+
+  hwloc-calc --restrict $(hwloc-calc --no-smt all) pu:2-5
+
 .TP
-\fB\-\-cpukind\fR <n>
-\fB\-\-cpukind\fR <infoname>=<infovalue>
+\fB\-\-cpukind\fR <n>, \fB\-\-cpukind\fR <infoname>=<infovalue>
 Only keep PUs whose CPU kind match.
 Either a single CPU kind is specified as an index,
-or the info name/value keypair will select matching kinds.
+or the info attribute name-value will select matching kinds.
 
 When specified by index, it corresponds to hwloc ranking of CPU kinds
 which returns energy-efficient cores first, and high-performance
 power-hungry cores last.
 The full list of CPU kinds may be seen with \fIlstopo --cpukinds\fR.
+
+Note that this option is applied after searching locations.
+Hence \fB\-\-cpukind 0 core:1\fR will return the second core of
+the machine if it is of kind 0, and nothing otherwise.
+To rather get the second core among those of kind 0, you should
+combine invocations:
+
+  hwloc-calc --restrict $(hwloc-calc --cpukind 0 all) core:1
+
 .TP
 \fB\-\-restrict\fR <cpuset>
 Restrict the topology to the given cpuset.
+This removes some PUs and their now-child-less parents.
+
+This is useful when combining invocations to filter some objects
+before selecting among them.
+
+Beware that restricting the PUs in a topology may change the
+logical indexes of many objects, including NUMA nodes.
 .TP
 \fB\-\-restrict\fR nodeset=<nodeset>
-Restrict the topology to the given nodeset, unless \fB\-\-restrict\-flags\fR specifies something different.
+Restrict the topology to the given nodeset
+(unless \fB\-\-restrict\-flags\fR specifies something different).
+This removes some NUMA nodes and their now-child-less parents.
+
+Beware that restricting the NUMA nodes in a topology may change the
+logical indexes of many objects, including PUs.
 .TP
 \fB\-\-restrict\-flags\fR <flags>
 Enforce flags when restricting the topology.
@@ -63,7 +92,7 @@ Include objects disallowed by administrative limitations.
 \fB\-i\fR <path>, \fB\-\-input\fR <path>
 Read the topology from <path> instead of discovering the topology of the local machine.
 
-If <path> is a file and XML support has been compiled in hwloc,
+If <path> is a file,
 it may be a XML file exported by a previous hwloc program.
 If <path> is "\-", the standard input may be used as a XML file.
 
@@ -122,6 +151,10 @@ as well as NUMA-nodes that are local to multiple CPUs.
 \fB\-\-ni\fR \fB\-\-nodeset\-input\fR
 Interpret input sets as nodesets instead of CPU sets.
 .TP
+\fB\-\-oo\fR \fB\-\-object\-output\fR
+When reporting object indexes (e.g. with \fB\-I\fR or \fB\-\-local\-memory\fR),
+this option prefixes these indexes with types (e.g. \fICore:0\fR instead of \fI0\fR).
+.TP
 \fB\-N \-\-number\-of <type|depth>\fR
 Report the number of objects of the given type or depth that intersect the CPU set.
 This is convenient for finding how many cores, NUMA nodes or PUs are available
@@ -130,6 +163,10 @@ in a machine.
 When combined with \fB\-\-nodeset\fR or \fB\-\-nodeset-output\fR,
 the nodeset is considered instead of the CPU set for finding matching objects.
 This is useful when reporting the output as a number or set of NUMA nodes.
+
+\fI<type\fR may contain a filter to select specific objects among
+the type. For instance \fB\-N "numa[hbm]"\fR counts NUMA nodes marked with subtype "HBM",
+while \fB\-N "numa[mcdram]"\fR only counts MCDRAM NUMA nodes on KNL.
 
 If an OS device subtype such as \fIgpu\fR  is given instead of \fIosdev\fR,
 only the os devices of that subtype will be counted.
@@ -149,8 +186,15 @@ When combined with \fB\-\-nodeset\fR or \fB\-\-nodeset-output\fR,
 the nodeset is considered instead of the CPU set for finding matching objects.
 This is useful when reporting the output as a number or set of NUMA nodes.
 
+\fI<type\fR may contain a filter to select specific objects among
+the type. For instance \fB\-N "numa[hbm]"\fR lists NUMA nodes marked with subtype "HBM",
+while \fB\-N "numa[mcdram]"\fR only lists MCDRAM NUMA nodes on KNL.
+
 If an OS device subtype such as \fIgpu\fR is given instead of \fIosdev\fR,
 only the os devices of that subtype will be returned.
+
+If combined with \fB\-\-object\-output\fR, object indexes are prefixed
+with types (e.g. \fICore:0\fR instead of \fI0\fR).
 .TP
 \fB\-H \-\-hierarchical <type1>.<type2>...\fR
 Find the list of objects of type <type2> that intersect the CPU set and
@@ -172,7 +216,8 @@ as first core of second NUMA node (HBM).
 Report (in a human readable format) the list of largest objects which exactly
 include all input objects (by looking at their CPU sets).
 None of these output objects intersect each other, and the sum of them is
-exactly equivalent to the input. No largest object is included in the input
+exactly equivalent to the input. No larger object is included in the input.
+
 This is different from \-\-intersect where reported objects may not be
 strictly included in the input.
 .TP
@@ -185,6 +230,9 @@ The selection performed by \fB\-\-local\-memory\fR may be precisely
 configured with \fB\-\-local\-memory\-flags\fR,
 while \fB\-I numa\fR just selects all nodes that are somehow local to
 any of the input objects.
+
+If combined with \fB\-\-object\-output\fR, object indexes are prefixed
+with types (e.g. \fINUMANode:0\fR instead of \fI0\fR).
 .TP
 \fB\-\-local\-memory\-flags\fR
 Change the flags used to select local NUMA nodes.
@@ -212,6 +260,8 @@ All existing attributes in the current topology may be listed with
 
     $ lstopo --memattrs
 
+If combined with \fB\-\-object\-output\fR, the object index is prefixed
+with its type (e.g. \fINUMANode:0\fR instead of \fI0\fR).
 .TP
 \fB\-\-sep <sep>\fR
 Change the field separator in the output.
@@ -340,14 +390,30 @@ To find how many cores are in the second CPU kind
 To display the list of NUMA nodes, by physical indexes,
 whose locality is exactly equal to a Package:
 
-    $ hwloc-calc --local-memory-flags 0 pack:1
+    $ hwloc-calc --local-memory-flags 0 --physical-output pack:1
     4,7
 
-To display the best-capacity NUMA node, by physical indexe,
+To display the best-capacity NUMA node, by physical indexes,
 whose locality is exactly equal to a Package:
 
-    $ hwloc-calc --local-memory-flags 0 --best-memattr capacity pack:1
+    $ hwloc-calc --local-memory-flags 0 --best-memattr capacity --physical-output pack:1
     4
+
+To find the number of NUMA nodes with subtype "HBM":
+
+    $ hwloc-calc -N "numa[hbm]" all
+    4
+
+To find the number of NUMA nodes in memory tier 1
+(DRAM nodes on a server with HBM and DRAM):
+
+    $ hwloc-calc -N "numa[tier=1]" all
+    4
+
+To find the NUMA node of subtype MCDRAM (on KNL) near a PU:
+
+    $ hwloc-calc -I "numa[mcdram]" pu:157
+    1
 
 Converting object logical indexes (default) from/to physical/OS indexes
 may be performed with \fB--intersect\fR combined with either \fB--physical-output\fR

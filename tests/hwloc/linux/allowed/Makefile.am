@@ -1,30 +1,30 @@
-# Copyright © 2009-2017 Inria.  All rights reserved.
+# Copyright © 2009-2023 Inria.  All rights reserved.
 # See COPYING in top-level directory.
 
 AM_CFLAGS = $(HWLOC_CFLAGS)
 AM_CPPFLAGS = $(HWLOC_CPPFLAGS)
 AM_LDFLAGS = $(HWLOC_LDFLAGS)
 
-tests_outputs = \
-	test1.output
+allowed_tests = \
+	test1.test
 
-tests_synthetics = \
-	test1.synthetic
+allowed_outputs = \
+	test1.xml
 
-tests_fsroots = \
+allowed_fsroots = \
 	test1.fsroot.tar.bz2
-
-tests_options = \
-	test1.options
-
-tests_envs =
 
 if HWLOC_HAVE_OPENAT
 if HWLOC_HAVE_BUNZIPP
-TESTS = $(tests_outputs)
+TESTS = $(allowed_tests)
 endif HWLOC_HAVE_BUNZIPP
 endif HWLOC_HAVE_OPENAT
 
-EXTRA_DIST = $(tests_outputs) $(tests_synthetics) $(tests_fsroots) $(tests_options) $(tests_envs)
+EXTRA_DIST = $(allowed_tests) $(allowed_outputs) $(allowed_fsroots)
 
-LOG_COMPILER = $(builddir)/test-topology.sh
+# .test is in TEXT_EXTENSIONS by default, hence it uses its own test configuration
+# variables prefixed with TEST_
+TEST_LOG_COMPILER = $(abs_builddir)/test-topology.sh
+
+check-local:
+	if test -x extra/extra-tests.sh; then extra/extra-tests.sh "$(TEST_LOG_COMPILER)"; fi

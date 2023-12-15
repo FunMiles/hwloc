@@ -1,6 +1,6 @@
 /*
  * Copyright © 2012 Aleksej Saushev, The NetBSD Foundation
- * Copyright © 2009-2019 Inria.  All rights reserved.
+ * Copyright © 2009-2023 Inria.  All rights reserved.
  * Copyright © 2009-2010, 2020 Université Bordeaux
  * Copyright © 2011 Cisco Systems, Inc.  All rights reserved.
  * See COPYING in top-level directory.
@@ -163,7 +163,7 @@ hwloc_look_netbsd(struct hwloc_backend *backend, struct hwloc_disc_status *dstat
     topology->machine_memory.local_memory = memsize;;
 
   /* Add NetBSD specific information */
-  hwloc_obj_add_info(topology->levels[0][0], "Backend", "NetBSD");
+  hwloc__add_info(&topology->infos, "Backend", "NetBSD");
   hwloc_add_uname_info(topology, NULL);
   return 0;
 }
@@ -192,7 +192,7 @@ hwloc_netbsd_component_instantiate(struct hwloc_topology *topology,
 				   const void *_data3 __hwloc_attribute_unused)
 {
   struct hwloc_backend *backend;
-  backend = hwloc_backend_alloc(topology, component);
+  backend = hwloc_backend_alloc(topology, component, 0);
   if (!backend)
     return NULL;
   backend->discover = hwloc_look_netbsd;

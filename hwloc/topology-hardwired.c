@@ -1,5 +1,5 @@
 /*
- * Copyright © 2015-2020 Inria.  All rights reserved.
+ * Copyright © 2015-2023 Inria.  All rights reserved.
  * See COPYING in top-level directory.
  */
 
@@ -73,6 +73,7 @@ int hwloc_look_hardwired_fujitsu_k(struct hwloc_topology *topology)
   topology->support.discovery->pu = 1;
   hwloc_setup_pu_level(topology, 8);
 
+  hwloc__add_info(&topology->infos, "Backend", "hardwired:K-computer");
   return 0;
 }
 
@@ -142,6 +143,7 @@ int hwloc_look_hardwired_fujitsu_fx10(struct hwloc_topology *topology)
   topology->support.discovery->pu = 1;
   hwloc_setup_pu_level(topology, 16);
 
+  hwloc__add_info(&topology->infos, "Backend", "hardwired:FX10");
   return 0;
 }
 
@@ -221,5 +223,6 @@ int hwloc_look_hardwired_fujitsu_fx100(struct hwloc_topology *topology)
   topology->support.discovery->pu = 1;
   hwloc_setup_pu_level(topology, 34);
 
+  hwloc__add_info(&topology->infos, "Backend", "hardwired:FX100");
   return 0;
 }

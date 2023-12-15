@@ -1,5 +1,5 @@
 /*
- * Copyright © 2013-2022 Inria.  All rights reserved.
+ * Copyright © 2013-2023 Inria.  All rights reserved.
  * Copyright © 2016 Cisco Systems, Inc.  All rights reserved.
  * See COPYING in top-level directory.
  */
@@ -164,7 +164,7 @@ struct hwloc_disc_status {
    */
   unsigned excluded_phases;
 
-  /** \brief OR'ed set of hwloc_disc_status_flag_e */
+  /** \brief OR'ed set of ::hwloc_disc_status_flag_e */
   unsigned long flags;
 };
 
@@ -212,9 +212,7 @@ struct hwloc_backend {
    */
   int is_thissystem;
 
-  /** \brief Backend private data, or NULL if none. */
-  void * private_data;
-  /** \brief Callback for freeing the private_data.
+  /** \brief Callback for freeing things stored inside the private data.
    * May be NULL.
    */
   void (*disable)(struct hwloc_backend *backend);
@@ -233,10 +231,16 @@ struct hwloc_backend {
   int (*get_pci_busid_cpuset)(struct hwloc_backend *backend, struct hwloc_pcidev_attr_s *busid, hwloc_bitmap_t cpuset);
 };
 
+/** \brief Return the private data pointer at the end of a backend structure. */
+#define HWLOC_BACKEND_PRIVATE_DATA(_backend) (void*)(((char*)(_backend)) + sizeof(struct hwloc_backend))
+
 /** \brief Allocate a backend structure, set good default values, initialize backend->component and topology, etc.
  * The caller will then modify whatever needed, and call hwloc_backend_enable().
+ * If \p private_data_size is positive, additional space is allocated at the end
+ * of the structure for storing backend private data. That space may be obtained
+ * with HWLOC_BACKEND_PRIVATE_DATA() and may be freely modified by the backend.
  */
-HWLOC_DECLSPEC struct hwloc_backend * hwloc_backend_alloc(struct hwloc_topology *topology, struct hwloc_disc_component *component);
+HWLOC_DECLSPEC struct hwloc_backend * hwloc_backend_alloc(struct hwloc_topology *topology, struct hwloc_disc_component *component, unsigned long private_data_size);
 
 /** \brief Enable a previously allocated and setup backend. */
 HWLOC_DECLSPEC int hwloc_backend_enable(struct hwloc_backend *backend);
@@ -519,7 +523,7 @@ hwloc_filter_check_pcidev_subtype_important(unsigned classid)
 static __hwloc_inline int
 hwloc_filter_check_osdev_subtype_important(hwloc_obj_osdev_type_t subtype)
 {
-  return (subtype != HWLOC_OBJ_OSDEV_DMA);
+  return (subtype && subtype != HWLOC_OBJ_OSDEV_DMA);
 }
 
 /** \brief Check whether a non-I/O object type should be filtered-out.

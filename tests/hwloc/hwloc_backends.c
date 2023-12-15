@@ -1,5 +1,5 @@
 /*
- * Copyright © 2012-2022 Inria.  All rights reserved.
+ * Copyright © 2012-2023 Inria.  All rights reserved.
  * See COPYING in top-level directory.
  */
 
@@ -39,17 +39,20 @@ static inline int mkstemp(char *name)
 
 static const char *get_backend_name(hwloc_topology_t topo)
 {
-  hwloc_obj_t root = hwloc_get_root_obj(topo);
-  return hwloc_obj_get_info_by_name(root, "Backend");
+  return hwloc_get_info_by_name(hwloc_topology_get_infos(topo), "Backend");
 }
 
 static void assert_backend_name(hwloc_topology_t topo, const char *wanted)
 {
   const char *found = get_backend_name(topo);
-  int diff;
-  assert(found);
-  diff = strcmp(found, wanted);
-  assert(!diff);
+  if (!wanted) {
+    assert(!found);
+  } else {
+    int diff;
+    assert(found);
+    diff = strcmp(found, wanted);
+    assert(!diff);
+  }
 }
 
 static void assert_foo_bar(hwloc_topology_t topo, int setornot)
@@ -74,7 +77,7 @@ int main(void)
   char xmlfile[] = "hwloc_backends.tmpxml.XXXXXX";
   char env[64];
   int xmlbufok = 0, xmlfileok = 0, xmlfilefd;
-  const char *orig_backend_name;
+  const char *orig_backend_name, *backend_name;
   int err;
 
   putenv((char *) "HWLOC_LIBXML_CLEANUP=1");
@@ -253,7 +256,9 @@ int main(void)
   assert(!err);
 #endif
   hwloc_topology_load(topology1);
-  assert(!get_backend_name(topology1)); /* noos doesn't put any Backend info attr */
+  backend_name = get_backend_name(topology1);
+  assert(backend_name);
+  assert(!strcmp(backend_name, "noOS"));
   hwloc_topology_check(topology1);
   assert(hwloc_topology_is_thissystem(topology1));
   hwloc_topology_destroy(topology1);

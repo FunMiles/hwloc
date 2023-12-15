@@ -104,7 +104,6 @@ hwloc_xml_callbacks_reset(void)
 
 static void
 hwloc__xml_import_object_attr(struct hwloc_topology *topology,
-			      struct hwloc_xml_backend_data_s *data __hwloc_attribute_unused,
 			      struct hwloc_obj *obj,
 			      const char *name, const char *value,
 			      hwloc__xml_import_state_t state,
@@ -385,13 +384,14 @@ hwloc__xml_import_object_attr(struct hwloc_topology *topology,
   else if (!strcmp(name, "osdev_type")) {
     switch (obj->type) {
     case HWLOC_OBJ_OS_DEVICE: {
-      unsigned osdev_type;
-      if (sscanf(value, "%u", &osdev_type) != 1) {
+      unsigned long osdev_type;
+      if (sscanf(value, "%lu", &osdev_type) != 1) {
 	if (hwloc__xml_verbose())
 	  fprintf(stderr, "%s: ignoring invalid osdev_type format string %s\n",
 		  state->global->msgprefix, value);
-      } else
-	obj->attr->osdev.type = (hwloc_obj_osdev_type_t) osdev_type;
+      } else {
+	obj->attr->osdev.type = osdev_type; /* v2 types will be updated later in hwloc__xml_import_object() */
+      }
       break;
     }
     default:
@@ -435,7 +435,8 @@ hwloc___xml_import_info(char **infonamep, char **infovaluep,
 }
 
 static int
-hwloc__xml_import_obj_info(struct hwloc_xml_backend_data_s *data __hwloc_attribute_unused,
+hwloc__xml_import_obj_info(hwloc_topology_t topology,
+                           struct hwloc_xml_backend_data_s *data,
                            hwloc_obj_t obj,
                            hwloc__xml_import_state_t state)
 {
@@ -449,15 +450,36 @@ hwloc__xml_import_obj_info(struct hwloc_xml_backend_data_s *data __hwloc_attribu
 
   if (infoname) {
     /* empty strings are ignored by libxml */
-    if (infovalue)
+    if (infovalue) {
+      if (data->version_major <= 2) {
+        /* v2 info tweaks */
+        if (!obj->parent) {
+          /* these v2 root infos must move to topo infos */
+          if (!strcmp(infoname, "Backend")
+              || !strcmp(infoname, "SyntheticDescription")
+              || !strcmp(infoname, "LinuxCgroup")
+              || !strcmp(infoname, "WindowsBuildEnvironment")
+              || !strcmp(infoname, "OSName")
+              || !strcmp(infoname, "OSRelease")
+              || !strcmp(infoname, "OSVersion")
+              || !strcmp(infoname, "HostName")
+              || !strcmp(infoname, "Architecture")
+              || !strcmp(infoname, "hwlocVersion")
+              || !strcmp(infoname, "ProcessName")) {
+            hwloc__add_info(&topology->infos, infoname, infovalue);
+            return 0;
+          }
+        }
+      }
       hwloc_obj_add_info(obj, infoname, infovalue);
+    }
   }
 
-  return err;
+  return 0;
 }
 
 static int
-hwloc__xml_import_pagetype(hwloc_topology_t topology __hwloc_attribute_unused, struct hwloc_numanode_attr_s *memory,
+hwloc__xml_import_pagetype(struct hwloc_numanode_attr_s *memory,
 			   hwloc__xml_import_state_t state)
 {
   uint64_t size = 0, count = 0;
@@ -466,7 +488,13 @@ hwloc__xml_import_pagetype(hwloc_topology_t topology __hwloc_attribute_unused, s
     char *attrname, *attrvalue;
     if (state->global->next_attr(state, &attrname, &attrvalue) < 0)
       break;
-    if (!strcmp(attrname, "size"))
+    if (!strcmp(attrname, "info")) {
+      char *infoname, *infovalue;
+      int ret = hwloc___xml_import_info(&infoname, &infovalue, state);
+      if (ret < 0)
+        return -1;
+      /* ignored */
+    } else if (!strcmp(attrname, "size"))
       size = strtoull(attrvalue, NULL, 10);
     else if (!strcmp(attrname, "count"))
       count = strtoull(attrvalue, NULL, 10);
@@ -490,7 +518,8 @@ hwloc__xml_import_pagetype(hwloc_topology_t topology __hwloc_attribute_unused, s
 }
 
 static int
-hwloc__xml_import_userdata(hwloc_topology_t topology __hwloc_attribute_unused, hwloc_obj_t obj,
+hwloc__xml_import_userdata(hwloc_topology_t topology,
+                           hwloc_obj_t obj,
 			   hwloc__xml_import_state_t state)
 {
   size_t length = 0;
@@ -613,7 +642,7 @@ static void hwloc__xml_import_report_outoforder(hwloc_topology_t topology, hwloc
 
 static int
 hwloc__xml_import_object(hwloc_topology_t topology,
-			 struct hwloc_xml_backend_data_s *data __hwloc_attribute_unused,
+			 struct hwloc_xml_backend_data_s *data,
 			 hwloc_obj_t parent, hwloc_obj_t obj, int *gotignored,
 			 hwloc__xml_import_state_t state)
 {
@@ -662,7 +691,7 @@ hwloc__xml_import_object(hwloc_topology_t topology,
 		  state->global->msgprefix,  attrname);
 	goto error_with_object;
       }
-      hwloc__xml_import_object_attr(topology, data, obj, attrname, attrvalue, state, &ignored);
+      hwloc__xml_import_object_attr(topology, obj, attrname, attrvalue, state, &ignored);
     }
   }
 
@@ -683,9 +712,9 @@ hwloc__xml_import_object(hwloc_topology_t topology,
 
     } else if (!strcmp(tag, "page_type")) {
       if (obj->type == HWLOC_OBJ_NUMANODE) {
-	ret = hwloc__xml_import_pagetype(topology, &obj->attr->numanode, &childstate);
+	ret = hwloc__xml_import_pagetype(&obj->attr->numanode, &childstate);
       } else if (!parent) {
-	ret = hwloc__xml_import_pagetype(topology, &topology->machine_memory, &childstate);
+	ret = hwloc__xml_import_pagetype(&topology->machine_memory, &childstate);
       } else {
 	if (hwloc__xml_verbose())
 	  fprintf(stderr, "%s: invalid non-NUMAnode object child %s\n",
@@ -694,7 +723,7 @@ hwloc__xml_import_object(hwloc_topology_t topology,
       }
 
     } else if (!strcmp(tag, "info")) {
-      ret = hwloc__xml_import_obj_info(data, obj, &childstate);
+      ret = hwloc__xml_import_obj_info(topology, data, obj, &childstate);
     } else if (!strcmp(tag, "userdata")) {
       ret = hwloc__xml_import_userdata(topology, obj, &childstate);
     } else {
@@ -748,6 +777,26 @@ hwloc__xml_import_object(hwloc_topology_t topology,
       obj->type = HWLOC_OBJ_DIE;
   }
 
+  /* 2.x backward compatibility */
+  if (data->version_major <= 2 && obj->type == HWLOC_OBJ_OS_DEVICE) {
+    /* check if we need to add backend info to the root */
+    const char *backend = hwloc_obj_get_info_by_name(obj, "Backend");
+    if (backend) {
+      if (!strcmp(backend, "CUDA"))
+        data->need_cuda_backend_info = 1;
+      else if (!strcmp(backend, "NVML"))
+        data->need_nvml_backend_info = 1;
+      else if (!strcmp(backend, "RSMI"))
+        data->need_rsmi_backend_info = 1;
+      else if (!strcmp(backend, "LevelZero"))
+        data->need_levelzero_backend_info = 1;
+      else if (!strcmp(backend, "OpenCL"))
+        data->need_opencl_backend_info = 1;
+      else if (!strcmp(backend, "GL"))
+        data->need_gl_backend_info = 1;
+    }
+  }
+
   /* check that cache attributes are coherent with the actual type */
   if (hwloc__obj_type_is_cache(obj->type)
       && obj->type != hwloc_cache_type_by_depth_type(obj->attr->cache.depth, obj->attr->cache.type)) {
@@ -793,9 +842,66 @@ hwloc__xml_import_object(hwloc_topology_t topology,
 		state->global->msgprefix, obj->os_index);
       goto error_with_object;
     }
-    data->nbnumanodes++;
   }
 
+  if (data->version_major < 3 && obj->type == HWLOC_OBJ_OS_DEVICE) {
+    unsigned long oldtype = obj->attr->osdev.type;
+    switch (oldtype) {
+    case 0: /* v2 Block */
+      if ((obj->name && !strncmp(obj->name, "dax", 3))) {
+        /* DAX is MEMORY, and STORAGE if NVM */
+        obj->attr->osdev.type = HWLOC_OBJ_OSDEV_MEMORY;
+        if (obj->subtype && !strcmp(obj->subtype, "NVM"))
+          obj->attr->osdev.type |= HWLOC_OBJ_OSDEV_STORAGE;
+      } else if (obj->subtype && !strcmp(obj->subtype, "CXLMem")) {
+        /* CXL is MEMORY, and STORAGE if there's some PMEM */
+        const char *info = hwloc_obj_get_info_by_name(obj, "CXLPMEMSize");
+        obj->attr->osdev.type = HWLOC_OBJ_OSDEV_MEMORY;
+        if (info)
+          obj->attr->osdev.type |= HWLOC_OBJ_OSDEV_STORAGE;
+      } else {
+        /* anything else is STORAGE */
+        obj->attr->osdev.type = HWLOC_OBJ_OSDEV_STORAGE;
+      }
+      break;
+    case 1: /* v2 GPU */
+      obj->attr->osdev.type = HWLOC_OBJ_OSDEV_GPU;
+      if (obj->name && (!strncmp(obj->name, "rsmi", 4) || !strncmp(obj->name, "nvml", 4) /* no RSMI/NVML subtype for v2.5 */))
+        obj->attr->osdev.type |= HWLOC_OBJ_OSDEV_COPROC;
+      break;
+    case 2: /* v2 Net */
+      obj->attr->osdev.type = HWLOC_OBJ_OSDEV_NETWORK;
+      break;
+    case 3: /* v2 OFED */
+      /* everything is NET and OFED, except BXI which became NET only */
+      obj->attr->osdev.type = HWLOC_OBJ_OSDEV_NETWORK;
+      if (!obj->subtype || strcmp(obj->subtype, "BXI"))
+        obj->attr->osdev.type |= HWLOC_OBJ_OSDEV_OPENFABRICS;
+      break;
+    case 4: /* v2 DMA */
+      obj->attr->osdev.type = HWLOC_OBJ_OSDEV_DMA;
+      break;
+    case 5: /* v2 COPROC */
+      obj->attr->osdev.type = HWLOC_OBJ_OSDEV_COPROC;
+      if (obj->subtype) {
+        /* CUDA and L0 are also GPU, and OpenCL GPU obviously */
+        if (!strcmp(obj->subtype, "CUDA") || !strcmp(obj->subtype, "LevelZero"))
+          obj->attr->osdev.type |= HWLOC_OBJ_OSDEV_GPU;
+        else if (!strcmp(obj->subtype, "OpenCL")) {
+          const char *info = hwloc_obj_get_info_by_name(obj, "OpenCLDeviceType");
+          if (info && !strcmp(info, "GPU"))
+            obj->attr->osdev.type |= HWLOC_OBJ_OSDEV_GPU;
+        }
+      }
+      break;
+    default:
+      /* unrecognized, no type */
+      obj->attr->osdev.type = 0;
+      break;
+    }
+  }
+
+  /* filter AFTER having updated the osdevice attribute from v2 */
   if (!hwloc_filter_check_keep_object(topology, obj)) {
     /* Ignore this object instead of inserting it.
      *
@@ -897,8 +1003,8 @@ hwloc__xml_import_object(hwloc_topology_t topology,
 }
 
 static int
-hwloc__xml_v2import_support(hwloc_topology_t topology,
-                            hwloc__xml_import_state_t state)
+hwloc__xml_import_support(hwloc_topology_t topology,
+                          hwloc__xml_import_state_t state)
 {
   char *name = NULL;
   int value = 1; /* value is optional */
@@ -971,9 +1077,9 @@ hwloc__xml_v2import_support(hwloc_topology_t topology,
 }
 
 static int
-hwloc__xml_v2import_distances(hwloc_topology_t topology,
-			      hwloc__xml_import_state_t state,
-			      int heterotypes)
+hwloc__xml_import_distances(hwloc_topology_t topology,
+                            hwloc__xml_import_state_t state,
+                            int heterotypes)
 {
   hwloc_obj_type_t unique_type = HWLOC_OBJ_TYPE_NONE;
   hwloc_obj_type_t *different_types = NULL;
@@ -1059,7 +1165,14 @@ hwloc__xml_v2import_distances(hwloc_topology_t topology,
     if (ret <= 0)
       break;
 
-    if (!strcmp(tag, "indexes"))
+    if (!strcmp(tag, "info")) {
+      char *infoname, *infovalue;
+      ret = hwloc___xml_import_info(&infoname, &infovalue, state);
+      if (ret < 0)
+        goto out_with_arrays;
+      /* ignored */
+      continue;
+    } else if (!strcmp(tag, "indexes"))
       is_index = 1;
     else if (!strcmp(tag, "u64values"))
       is_u64values = 1;
@@ -1392,6 +1505,10 @@ hwloc__xml_import_memattr(hwloc_topology_t topology,
 
     if (!strcmp(tag, "memattr_value")) {
       ret = hwloc__xml_import_memattr_value(topology, id, flags, &childstate);
+    } else if (!strcmp(tag, "info")) {
+      char *infoname, *infovalue;
+      ret = hwloc___xml_import_info(&infoname, &infovalue, &childstate);
+      /* ignored */
     } else {
       if (hwloc__xml_verbose())
         fprintf(stderr, "%s: memattr with unrecognized child %s\n",
@@ -1417,9 +1534,12 @@ hwloc__xml_import_cpukind(hwloc_topology_t topology,
 {
   hwloc_bitmap_t cpuset = NULL;
   int forced_efficiency = HWLOC_CPUKIND_EFFICIENCY_UNKNOWN;
-  unsigned nr_infos = 0;
-  struct hwloc_info_s *infos = NULL;
+  struct hwloc_infos_s infos;
   int ret;
+
+  infos.array = NULL;
+  infos.count = 0;
+  infos.allocated = 0;
 
   while (1) {
     char *attrname, *attrvalue;
@@ -1453,7 +1573,7 @@ hwloc__xml_import_cpukind(hwloc_topology_t topology,
       char *infovalue = NULL;
       ret = hwloc___xml_import_info(&infoname, &infovalue, &childstate);
       if (!ret && infoname && infovalue)
-        hwloc__add_info(&infos, &nr_infos, infoname, infovalue);
+        hwloc__add_info(&infos, infoname, infovalue);
     } else {
       if (hwloc__xml_verbose())
         fprintf(stderr, "%s: cpukind with unrecognized child %s\n",
@@ -1475,17 +1595,17 @@ hwloc__xml_import_cpukind(hwloc_topology_t topology,
   }
 
   if (topology->flags & HWLOC_TOPOLOGY_FLAG_NO_CPUKINDS) {
-    hwloc__free_infos(infos, nr_infos);
+    hwloc__free_infos(&infos);
     hwloc_bitmap_free(cpuset);
   } else {
-    hwloc_internal_cpukinds_register(topology, cpuset, forced_efficiency, infos, nr_infos, HWLOC_CPUKINDS_REGISTER_FLAG_OVERWRITE_FORCED_EFFICIENCY);
-    hwloc__free_infos(infos, nr_infos);
+    hwloc_internal_cpukinds_register(topology, cpuset, forced_efficiency, &infos, HWLOC_CPUKINDS_REGISTER_FLAG_OVERWRITE_FORCED_EFFICIENCY);
+    hwloc__free_infos(&infos);
   }
 
   return state->global->close_tag(state);
 
  error:
-  hwloc__free_infos(infos, nr_infos);
+  hwloc__free_infos(&infos);
   hwloc_bitmap_free(cpuset);
   return -1;
 }
@@ -1649,7 +1769,7 @@ hwloc_look_xml(struct hwloc_backend *backend, struct hwloc_disc_status *dstatus)
    */
 
   struct hwloc_topology *topology = backend->topology;
-  struct hwloc_xml_backend_data_s *data = backend->private_data;
+  struct hwloc_xml_backend_data_s *data = HWLOC_BACKEND_PRIVATE_DATA(backend);
   struct hwloc__xml_import_state_s state, childstate;
   struct hwloc_obj *root = topology->levels[0][0];
   char *tag;
@@ -1665,7 +1785,12 @@ hwloc_look_xml(struct hwloc_backend *backend, struct hwloc_disc_status *dstatus)
 
   hwloc_localeswitch_init();
 
-  data->nbnumanodes = 0;
+  data->need_cuda_backend_info = 0;
+  data->need_nvml_backend_info = 0;
+  data->need_rsmi_backend_info = 0;
+  data->need_levelzero_backend_info = 0;
+  data->need_opencl_backend_info = 0;
+  data->need_gl_backend_info = 0;
 
   ret = data->look_init(data, &state);
   if (ret < 0)
@@ -1708,15 +1833,15 @@ hwloc_look_xml(struct hwloc_backend *backend, struct hwloc_disc_status *dstatus)
       if (!ret)
 	break;
       if (!strcmp(tag, "distances2")) {
-	ret = hwloc__xml_v2import_distances(topology, &childstate, 0);
+	ret = hwloc__xml_import_distances(topology, &childstate, 0);
 	if (ret < 0)
 	  goto failed;
       } else if (!strcmp(tag, "distances2hetero")) {
-	ret = hwloc__xml_v2import_distances(topology, &childstate, 1);
+	ret = hwloc__xml_import_distances(topology, &childstate, 1);
 	if (ret < 0)
 	  goto failed;
       } else if (!strcmp(tag, "support")) {
-	ret = hwloc__xml_v2import_support(topology, &childstate);
+	ret = hwloc__xml_import_support(topology, &childstate);
 	if (ret < 0)
 	  goto failed;
       } else if (!strcmp(tag, "memattr")) {
@@ -1727,6 +1852,13 @@ hwloc_look_xml(struct hwloc_backend *backend, struct hwloc_disc_status *dstatus)
         ret = hwloc__xml_import_cpukind(topology, &childstate);
         if (ret < 0)
           goto failed;
+      } else if (!strcmp(tag, "info")) {
+        char *infoname, *infovalue;
+        ret = hwloc___xml_import_info(&infoname, &infovalue, &childstate);
+        if (ret < 0)
+          goto failed;
+        if (infoname && infovalue)
+          hwloc__add_info(&topology->infos, infoname, infovalue);
       } else {
 	if (hwloc__xml_verbose())
 	  fprintf(stderr, "%s: ignoring unknown tag `%s' after root object.\n",
@@ -1775,17 +1907,48 @@ done:
   /* allocate default cpusets and nodesets if missing, the core will restrict them */
   hwloc_alloc_root_sets(root);
 
-  /* keep the "Backend" information intact */
+  /* keep the "Backend" information intact, but we had missing ones from v3 */
+  if (data->version_major <= 2) {
+    struct hwloc_infos_s *infos = &topology->infos;
+    unsigned i;
+    /* check if root already has some backend info */
+    for(i=0; i<infos->count; i++)
+      if (!strcmp(infos->array[i].name, "Backend")) {
+        if (!strcmp(infos->array[i].value, "CUDA"))
+          data->need_cuda_backend_info = 0;
+        if (!strcmp(infos->array[i].value, "NVML"))
+          data->need_nvml_backend_info = 0;
+        if (!strcmp(infos->array[i].value, "RSMI"))
+          data->need_rsmi_backend_info = 0;
+        if (!strcmp(infos->array[i].value, "LevelZero"))
+          data->need_levelzero_backend_info = 0;
+        if (!strcmp(infos->array[i].value, "OpenCL"))
+          data->need_opencl_backend_info = 0;
+        if (!strcmp(infos->array[i].value, "GL"))
+          data->need_gl_backend_info = 0;
+      }
+    /* add missing backend info */
+    if (data->need_cuda_backend_info)
+      hwloc__add_info(infos, "Backend", "CUDA");
+    if (data->need_nvml_backend_info)
+      hwloc__add_info(infos, "Backend", "NVML");
+    if (data->need_rsmi_backend_info)
+      hwloc__add_info(infos, "Backend", "RSMI");
+    if (data->need_levelzero_backend_info)
+      hwloc__add_info(infos, "Backend", "LevelZero");
+    if (data->need_opencl_backend_info)
+      hwloc__add_info(infos, "Backend", "OpenCL");
+    if (data->need_gl_backend_info)
+      hwloc__add_info(infos, "Backend", "GL");
+  }
   /* we could add "BackendSource=XML" to notify that XML was used between the actual backend and here */
 
   if (!(topology->flags & HWLOC_TOPOLOGY_FLAG_IMPORT_SUPPORT)) {
     topology->support.discovery->pu = 1;
     topology->support.discovery->disallowed_pu = 1;
-    if (data->nbnumanodes) {
-      topology->support.discovery->numa = 1;
-      topology->support.discovery->numa_memory = 1; // FIXME
-      topology->support.discovery->disallowed_numa = 1;
-    }
+    topology->support.discovery->numa = 1;
+    topology->support.discovery->numa_memory = 1; // FIXME
+    topology->support.discovery->disallowed_numa = 1;
   }
 
   if (data->look_done)
@@ -1941,6 +2104,27 @@ hwloc__xml_export_safestrdup(const char *old)
 }
 
 static void
+hwloc__xml_export_info_attr_safe(hwloc__xml_export_state_t state, const char *name, const char *value)
+{
+  struct hwloc__xml_export_state_s childstate;
+  state->new_child(state, &childstate, "info");
+  childstate.new_prop(&childstate, "name", name);
+  childstate.new_prop(&childstate, "value", value);
+  childstate.end_object(&childstate, "info");
+}
+
+static void
+hwloc__xml_export_info_attr(hwloc__xml_export_state_t state, const char *_name, const char *_value)
+{
+  char *name = hwloc__xml_export_safestrdup(_name);
+  char *value = hwloc__xml_export_safestrdup(_value);
+  if (name && value)
+    hwloc__xml_export_info_attr_safe(state, name, value);
+  free(name);
+  free(value);
+}
+
+static void
 hwloc__xml_export_object_contents (hwloc__xml_export_state_t state, hwloc_topology_t topology, hwloc_obj_t obj, unsigned long flags)
 {
   char *setstring = NULL;
@@ -2083,25 +2267,56 @@ hwloc__xml_export_object_contents (hwloc__xml_export_state_t state, hwloc_topolo
     state->new_prop(state, "pci_link_speed", tmp);
     break;
   case HWLOC_OBJ_OS_DEVICE:
-    sprintf(tmp, "%d", (int) obj->attr->osdev.type);
-    state->new_prop(state, "osdev_type", tmp);
+    if (v2export) {
+      if (obj->attr->osdev.type & (HWLOC_OBJ_OSDEV_STORAGE|HWLOC_OBJ_OSDEV_MEMORY)) {
+        state->new_prop(state, "osdev_type", "0"); /* v2 Block */
+      } else if (obj->attr->osdev.type & HWLOC_OBJ_OSDEV_OPENFABRICS) {
+        state->new_prop(state, "osdev_type", "3"); /* v2 OFED */
+      } else if (obj->attr->osdev.type & HWLOC_OBJ_OSDEV_NETWORK) {
+        if (obj->subtype && !strcmp(obj->subtype, "BXI"))
+          state->new_prop(state, "osdev_type", "3"); /* v2 OFED */
+        else
+          state->new_prop(state, "osdev_type", "2"); /* v2 Net */
+      } else if (obj->attr->osdev.type & HWLOC_OBJ_OSDEV_DMA) {
+        state->new_prop(state, "osdev_type", "4"); /* v2 DMA */
+      } else if (obj->attr->osdev.type & HWLOC_OBJ_OSDEV_COPROC) {
+        if (obj->name && (!strncmp(obj->name, "nvml", 4) || !strncmp(obj->name, "rsmi", 4)))
+          state->new_prop(state, "osdev_type", "1"); /* v2 GPU */
+        else
+          state->new_prop(state, "osdev_type", "5"); /* v2 CoProc */
+      } else if (obj->attr->osdev.type & HWLOC_OBJ_OSDEV_GPU) {
+        state->new_prop(state, "osdev_type", "1"); /* v2 GPU */
+      }
+    } else {
+      sprintf(tmp, "%lu", obj->attr->osdev.type);
+      state->new_prop(state, "osdev_type", tmp);
+    }
     break;
   default:
     break;
   }
 
-  for(i=0; i<obj->infos_count; i++) {
-    char *name = hwloc__xml_export_safestrdup(obj->infos[i].name);
-    char *value = hwloc__xml_export_safestrdup(obj->infos[i].value);
-    if (name && value) {
-      struct hwloc__xml_export_state_s childstate;
-      state->new_child(state, &childstate, "info");
-      childstate.new_prop(&childstate, "name", name);
-      childstate.new_prop(&childstate, "value", value);
-      childstate.end_object(&childstate, "info");
+  for(i=0; i<obj->infos.count; i++)
+    hwloc__xml_export_info_attr(state, obj->infos.array[i].name, obj->infos.array[i].value);
+  if (v2export && !obj->parent)
+    for(i=0; i<topology->infos.count; i++)
+      hwloc__xml_export_info_attr(state, topology->infos.array[i].name, topology->infos.array[i].value);
+
+  if (v2export && obj->type == HWLOC_OBJ_OS_DEVICE && obj->subtype && !hwloc_obj_get_info_by_name(obj, "Backend")) {
+    /* v2 gpus had Backend inside the object itself */
+    if (!strcmp(obj->subtype, "CUDA")) {
+      hwloc__xml_export_info_attr_safe(state, "Backend", "CUDA");
+    } else if (!strcmp(obj->subtype, "NVML")) {
+      hwloc__xml_export_info_attr_safe(state, "Backend", "NVML");
+    } else if (!strcmp(obj->subtype, "OpenCL")) {
+      hwloc__xml_export_info_attr_safe(state, "Backend", "OpenCL");
+    } else if (!strcmp(obj->subtype, "RSMI")) {
+      hwloc__xml_export_info_attr_safe(state, "Backend", "RSMI");
+    } else if (!strcmp(obj->subtype, "LevelZero")) {
+      hwloc__xml_export_info_attr_safe(state, "Backend", "LevelZero");
+    } else if (!strcmp(obj->subtype, "Display")) {
+      hwloc__xml_export_info_attr_safe(state, "Backend", "GL");
     }
-    free(name);
-    free(value);
   }
   if (obj->userdata && topology->userdata_export_cb)
     topology->userdata_export_cb((void*) state, topology, obj);
@@ -2395,20 +2610,19 @@ hwloc__xml_export_cpukinds(hwloc__xml_export_state_t state, hwloc_topology_t top
       cstate.new_prop(&cstate, "forced_efficiency", tmp);
     }
 
-    for(j=0; j<kind->nr_infos; j++) {
-      char *name = hwloc__xml_export_safestrdup(kind->infos[j].name);
-      char *value = hwloc__xml_export_safestrdup(kind->infos[j].value);
-      struct hwloc__xml_export_state_s istate;
-      cstate.new_child(&cstate, &istate, "info");
-      istate.new_prop(&istate, "name", name);
-      istate.new_prop(&istate, "value", value);
-      istate.end_object(&istate, "info");
-      free(name);
-      free(value);
-    }
+    for(j=0; j<kind->infos.count; j++)
+      hwloc__xml_export_info_attr(&cstate, kind->infos.array[j].name, kind->infos.array[j].value);
 
     cstate.end_object(&cstate, "cpukind");
   }
+}
+
+static void
+hwloc__xml_export_infos(hwloc__xml_export_state_t state, hwloc_topology_t topology)
+{
+  unsigned j;
+  for(j=0; j<topology->infos.count; j++)
+    hwloc__xml_export_info_attr(state, topology->infos.array[j].name, topology->infos.array[j].value);
 }
 
 void
@@ -2424,6 +2638,8 @@ hwloc__xml_export_topology(hwloc__xml_export_state_t state, hwloc_topology_t top
       hwloc__xml_v2export_support(state, topology);
     hwloc__xml_export_memattrs(state, topology);
     hwloc__xml_export_cpukinds(state, topology);
+    if (!(flags & HWLOC_TOPOLOGY_EXPORT_XML_FLAG_V2))
+      hwloc__xml_export_infos(state, topology);
 }
 
 void
@@ -2777,10 +2993,9 @@ hwloc_topology_set_userdata_import_callback(hwloc_topology_t topology,
 static void
 hwloc_xml_backend_disable(struct hwloc_backend *backend)
 {
-  struct hwloc_xml_backend_data_s *data = backend->private_data;
+  struct hwloc_xml_backend_data_s *data = HWLOC_BACKEND_PRIVATE_DATA(backend);
   data->backend_exit(data);
   free(data->msgprefix);
-  free(data);
 }
 
 static struct hwloc_backend *
@@ -2814,17 +3029,12 @@ hwloc_xml_component_instantiate(struct hwloc_topology *topology,
     }
   }
 
-  backend = hwloc_backend_alloc(topology, component);
+  backend = hwloc_backend_alloc(topology, component, sizeof(struct hwloc_xml_backend_data_s));
   if (!backend)
     goto out;
 
-  data = malloc(sizeof(*data));
-  if (!data) {
-    errno = ENOMEM;
-    goto out_with_backend;
-  }
+  data = HWLOC_BACKEND_PRIVATE_DATA(backend);
 
-  backend->private_data = data;
   backend->discover = hwloc_look_xml;
   backend->disable = hwloc_xml_backend_disable;
   backend->is_thissystem = 0;
@@ -2852,14 +3062,12 @@ retry:
     }
   }
   if (err < 0)
-    goto out_with_data;
+    goto out_with_msgprefix;
 
   return backend;
 
- out_with_data:
+ out_with_msgprefix:
   free(data->msgprefix);
-  free(data);
- out_with_backend:
   free(backend);
  out:
   return NULL;

@@ -1,6 +1,6 @@
 /*
  * Copyright © 2011 Université Bordeaux
- * Copyright © 2012-2022 Inria.  All rights reserved.
+ * Copyright © 2012-2023 Inria.  All rights reserved.
  * See COPYING in top-level directory.
  */
 
@@ -73,6 +73,7 @@ hwloc_cuda_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dst
   struct hwloc_topology *topology = backend->topology;
   enum hwloc_type_filter_e filter;
   cudaError_t cures;
+  unsigned added = 0;
   int nb, i;
 
   assert(dstatus->phase == HWLOC_DISC_PHASE_IO);
@@ -102,10 +103,9 @@ hwloc_cuda_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dst
     snprintf(cuda_name, sizeof(cuda_name), "cuda%d", i);
     cuda_device->name = strdup(cuda_name);
     cuda_device->depth = HWLOC_TYPE_DEPTH_UNKNOWN;
-    cuda_device->attr->osdev.type = HWLOC_OBJ_OSDEV_COPROC;
+    cuda_device->attr->osdev.type = HWLOC_OBJ_OSDEV_COPROC | HWLOC_OBJ_OSDEV_GPU;
 
     cuda_device->subtype = strdup("CUDA");
-    hwloc_obj_add_info(cuda_device, "Backend", "CUDA");
     hwloc_obj_add_info(cuda_device, "GPUVendor", "NVIDIA Corporation");
 
     cures = cudaGetDeviceProperties(&prop, i);
@@ -138,8 +138,11 @@ hwloc_cuda_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dst
       parent = hwloc_get_root_obj(topology);
 
     hwloc_insert_object_by_parent(topology, parent, cuda_device);
+    added++;
   }
 
+  if (added > 0)
+    hwloc_modify_infos(hwloc_topology_get_infos(topology), HWLOC_MODIFY_INFOS_OP_ADD, "Backend", "CUDA");
   return 0;
 }
 
@@ -153,7 +156,7 @@ hwloc_cuda_component_instantiate(struct hwloc_topology *topology,
 {
   struct hwloc_backend *backend;
 
-  backend = hwloc_backend_alloc(topology, component);
+  backend = hwloc_backend_alloc(topology, component, 0);
   if (!backend)
     return NULL;
   /* the first callback will initialize those */

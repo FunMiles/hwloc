@@ -1,6 +1,6 @@
 /*
  * Copyright © 2009 CNRS
- * Copyright © 2009-2022 Inria.  All rights reserved.
+ * Copyright © 2009-2023 Inria.  All rights reserved.
  * Copyright © 2009-2011, 2013 Université Bordeaux
  * Copyright © 2011 Cisco Systems, Inc.  All rights reserved.
  * See COPYING in top-level directory.
@@ -817,7 +817,7 @@ hwloc_look_aix(struct hwloc_backend *backend, struct hwloc_disc_status *dstatus)
 	}
     }
 
-  hwloc_obj_add_info(topology->levels[0][0], "Backend", "AIX");
+  hwloc__add_info(&topology->infos, "Backend", "AIX");
   hwloc_add_uname_info(topology, NULL);
   return 0;
 }
@@ -878,7 +878,7 @@ hwloc_aix_component_instantiate(struct hwloc_topology *topology,
 				const void *_data3 __hwloc_attribute_unused)
 {
   struct hwloc_backend *backend;
-  backend = hwloc_backend_alloc(topology, component);
+  backend = hwloc_backend_alloc(topology, component, 0);
   if (!backend)
     return NULL;
   backend->discover = hwloc_look_aix;

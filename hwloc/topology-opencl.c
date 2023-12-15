@@ -1,5 +1,5 @@
 /*
- * Copyright © 2012-2022 Inria.  All rights reserved.
+ * Copyright © 2012-2023 Inria.  All rights reserved.
  * Copyright © 2013, 2018 Université Bordeaux.  All right reserved.
  * See COPYING in top-level directory.
  */
@@ -51,7 +51,7 @@ hwloc_opencl_discover(struct hwloc_backend *backend, struct hwloc_disc_status *d
   cl_uint nr_platforms;
   cl_platform_id *platform_ids;
   cl_int clret;
-  unsigned j;
+  unsigned j, added = 0;
 
   assert(dstatus->phase == HWLOC_DISC_PHASE_IO);
 
@@ -120,20 +120,23 @@ hwloc_opencl_discover(struct hwloc_backend *backend, struct hwloc_disc_status *d
       snprintf(buffer, sizeof(buffer), "opencl%ud%u", j, i);
       osdev->name = strdup(buffer);
       osdev->depth = HWLOC_TYPE_DEPTH_UNKNOWN;
-      osdev->attr->osdev.type = HWLOC_OBJ_OSDEV_COPROC;
 
       osdev->subtype = strdup("OpenCL");
-      hwloc_obj_add_info(osdev, "Backend", "OpenCL");
 
       /* in theory, we should handle cases such GPU|Accelerator|CPU for strange platforms/devices */
-      if (type & CL_DEVICE_TYPE_GPU)
+      if (type & CL_DEVICE_TYPE_GPU) {
 	hwloc_obj_add_info(osdev, "OpenCLDeviceType", "GPU");
-      else if (type & CL_DEVICE_TYPE_ACCELERATOR)
+        osdev->attr->osdev.type = HWLOC_OBJ_OSDEV_COPROC | HWLOC_OBJ_OSDEV_GPU;
+      } else if (type & CL_DEVICE_TYPE_ACCELERATOR) {
 	hwloc_obj_add_info(osdev, "OpenCLDeviceType", "Accelerator");
-      else if (type & HWLOC_CL_DEVICE_TYPE_CUSTOM)
+        osdev->attr->osdev.type = HWLOC_OBJ_OSDEV_COPROC;
+      } else if (type & HWLOC_CL_DEVICE_TYPE_CUSTOM) {
 	hwloc_obj_add_info(osdev, "OpenCLDeviceType", "Custom"); /* Custom cannot be combined with any other type */
-      else
+        osdev->attr->osdev.type = HWLOC_OBJ_OSDEV_COPROC;
+      } else {
 	hwloc_obj_add_info(osdev, "OpenCLDeviceType", "Unknown");
+        osdev->attr->osdev.type = HWLOC_OBJ_OSDEV_COPROC;
+      }
 
       buffer[0] = '\0';
       clGetDeviceInfo(device_ids[i], CL_DEVICE_VENDOR, sizeof(buffer), buffer, NULL);
@@ -179,10 +182,14 @@ hwloc_opencl_discover(struct hwloc_backend *backend, struct hwloc_disc_status *d
 	parent = hwloc_get_root_obj(topology);
 
       hwloc_insert_object_by_parent(topology, parent, osdev);
+      added++;
     }
     free(device_ids);
   }
   free(platform_ids);
+
+  if (added)
+    hwloc_modify_infos(hwloc_topology_get_infos(topology), HWLOC_MODIFY_INFOS_OP_ADD, "Backend", "OpenCL");
   return 0;
 }
 
@@ -196,7 +203,7 @@ hwloc_opencl_component_instantiate(struct hwloc_topology *topology,
 {
   struct hwloc_backend *backend;
 
-  backend = hwloc_backend_alloc(topology, component);
+  backend = hwloc_backend_alloc(topology, component, 0);
   if (!backend)
     return NULL;
   backend->discover = hwloc_opencl_discover;

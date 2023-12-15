@@ -1,0 +1,4 @@
+# Group subtypes and Misc names
+source:  16-2gr2gr2n2c+misc.xml
+target:  16-2gr2gr2n2c+misc.console
+options: -v

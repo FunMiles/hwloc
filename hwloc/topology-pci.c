@@ -1,6 +1,6 @@
 /*
  * Copyright © 2009 CNRS
- * Copyright © 2009-2022 Inria.  All rights reserved.
+ * Copyright © 2009-2023 Inria.  All rights reserved.
  * Copyright © 2009-2011, 2013 Université Bordeaux
  * Copyright © 2014-2018 Cisco Systems, Inc.  All rights reserved.
  * Copyright © 2015      Research Organization for Information Science
@@ -141,16 +141,11 @@ hwloc_look_pci(struct hwloc_backend *backend, struct hwloc_disc_status *dstatus)
   struct hwloc_topology *topology = backend->topology;
   enum hwloc_type_filter_e pfilter, bfilter;
   struct hwloc_obj *tree = NULL;
+  unsigned added = 0;
   int ret;
   struct pci_device_iterator *iter;
   struct pci_device *pcidev;
   struct pci_id_match m;
-
-  m.subvendor_id = PCI_MATCH_ANY;
-  m.subdevice_id = PCI_MATCH_ANY;
-  m.device_class = 0;
-  m.device_class_mask = 0;
-  m.match_data = 0;
 
   hwloc_topology_get_type_filter(topology, HWLOC_OBJ_PCI_DEVICE, &pfilter);
   hwloc_topology_get_type_filter(topology, HWLOC_OBJ_BRIDGE, &bfilter);
@@ -165,6 +160,12 @@ hwloc_look_pci(struct hwloc_backend *backend, struct hwloc_disc_status *dstatus)
   assert(dstatus->phase == HWLOC_DISC_PHASE_PCI);
 
   hwloc_debug("%s", "\nScanning PCI buses...\n");
+
+  m.subvendor_id = PCI_MATCH_ANY;
+  m.subdevice_id = PCI_MATCH_ANY;
+  m.device_class = 0;
+  m.device_class_mask = 0;
+  m.match_data = 0;
 
   /* pciaccess isn't thread-safe. it uses a single global variable that doesn't have
    * refcounting, and is dynamically reallocated when vendor/device names are needed, etc.
@@ -223,17 +224,13 @@ hwloc_look_pci(struct hwloc_backend *backend, struct hwloc_disc_status *dstatus)
 
     /* filtered? */
     if (type == HWLOC_OBJ_PCI_DEVICE) {
-      enum hwloc_type_filter_e filter;
-      hwloc_topology_get_type_filter(topology, HWLOC_OBJ_PCI_DEVICE, &filter);
-      if (filter == HWLOC_TYPE_FILTER_KEEP_NONE)
+      if (pfilter == HWLOC_TYPE_FILTER_KEEP_NONE)
 	continue;
-      if (filter == HWLOC_TYPE_FILTER_KEEP_IMPORTANT
+      if (pfilter == HWLOC_TYPE_FILTER_KEEP_IMPORTANT
 	  && !hwloc_filter_check_pcidev_subtype_important(device_class))
 	continue;
     } else if (type == HWLOC_OBJ_BRIDGE) {
-      enum hwloc_type_filter_e filter;
-      hwloc_topology_get_type_filter(topology, HWLOC_OBJ_BRIDGE, &filter);
-      if (filter == HWLOC_TYPE_FILTER_KEEP_NONE)
+      if (bfilter == HWLOC_TYPE_FILTER_KEEP_NONE)
 	continue;
       /* HWLOC_TYPE_FILTER_KEEP_IMPORTANT filtered later in the core */
     }
@@ -366,6 +363,7 @@ hwloc_look_pci(struct hwloc_backend *backend, struct hwloc_disc_status *dstatus)
 
     hwloc_pci_get_obj_names(obj, &m);
     hwloc_pcidisc_tree_insert_by_busid(&tree, obj);
+    added++;
   }
 
   /* finalize device scanning */
@@ -379,6 +377,9 @@ hwloc_look_pci(struct hwloc_backend *backend, struct hwloc_disc_status *dstatus)
   dstatus->excluded_phases |= HWLOC_DISC_PHASE_PCI;
   /* no need to run the annotate phase, we did it above */
   backend->phases &= HWLOC_DISC_PHASE_ANNOTATE;
+
+  if (added)
+    hwloc_modify_infos(hwloc_topology_get_infos(topology), HWLOC_MODIFY_INFOS_OP_ADD, "Backend", "PCI");
   return 0;
 }
 
@@ -392,7 +393,7 @@ hwloc_pci_component_instantiate(struct hwloc_topology *topology,
 {
   struct hwloc_backend *backend;
 
-  backend = hwloc_backend_alloc(topology, component);
+  backend = hwloc_backend_alloc(topology, component, 0);
   if (!backend)
     return NULL;
   backend->discover = hwloc_look_pci;

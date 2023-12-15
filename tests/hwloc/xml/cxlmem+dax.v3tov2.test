@@ -1,0 +1,4 @@
+# Import CXL and DAX attributes from v3 to v2
+source:  cxlmem+dax.v3.xml
+target:  cxlmem+dax.v2.xml
+options: --export-xml-flags 2 --of xml

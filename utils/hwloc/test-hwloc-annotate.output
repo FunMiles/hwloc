@@ -16,12 +16,6 @@
     <info name="DMIBIOSVersion" value="A12"/>
     <info name="DMIBIOSDate" value="05/09/2012"/>
     <info name="DMISysVendor" value="Dell Inc."/>
-    <info name="Backend" value="Linux"/>
-    <info name="OSName" value="Linux"/>
-    <info name="OSRelease" value="3.2.0-3-amd64"/>
-    <info name="OSVersion" value="#1 SMP Thu Jun 28 09:07:26 UTC 2012"/>
-    <info name="HostName" value="rhododendron"/>
-    <info name="Architecture" value="x86_64"/>
     <info name="Foo" value="Bar"/>
     <object type="NUMANode" os_index="0" cpuset="0x0000000f" complete_cpuset="0x0000000f" nodeset="0x00000001" complete_nodeset="0x00000001" gp_index="2" id="obj2" local_memory="4014030848">
       <page_type size="4096" count="979988"/>
@@ -102,10 +96,10 @@
         <info name="Foo" value="Bar"/>
         <info name="mypcidev" value="byindex"/>
         <info name="mypcidev" value="bymatch"/>
-        <object type="OSDev" gp_index="19" id="obj19" name="controlD64" osdev_type="1">
+        <object type="OSDev" gp_index="19" id="obj19" name="controlD64" osdev_type="4">
           <info name="Foo" value="Bar"/>
         </object>
-        <object type="OSDev" gp_index="20" id="obj20" name="card0" osdev_type="1">
+        <object type="OSDev" gp_index="20" id="obj20" name="card0" osdev_type="4">
           <info name="Foo" value="Bar"/>
         </object>
       </object>
@@ -114,7 +108,7 @@
         <info name="PCIDevice" value="82577LM Gigabit Network Connection"/>
         <info name="Foo" value="Bar"/>
         <info name="mypcidev" value="byindex"/>
-        <object type="OSDev" gp_index="22" id="obj22" name="eth0" osdev_type="2">
+        <object type="OSDev" gp_index="22" id="obj22" name="eth0" osdev_type="16">
           <info name="Address" value="5c:26:0a:53:da:8c"/>
           <info name="Foo" value="Bar"/>
           <info name="myosdev" value="byindex"/>
@@ -130,7 +124,7 @@
           <info name="PCIDevice" value="Centrino Ultimate-N 6300"/>
           <info name="Foo" value="Bar"/>
           <info name="mypcidev" value="bybusid"/>
-          <object type="OSDev" gp_index="25" id="obj25" name="wlan0" osdev_type="2">
+          <object type="OSDev" gp_index="25" id="obj25" name="wlan0" osdev_type="16">
             <info name="Address" value="00:24:d7:0f:bd:34"/>
             <info name="Foo" value="Bar"/>
             <info name="myosdev" value="byindex"/>
@@ -141,10 +135,10 @@
         <info name="PCIVendor" value="Intel Corporation"/>
         <info name="PCIDevice" value="5 Series/3400 Series Chipset 6 port SATA AHCI Controller"/>
         <info name="Foo" value="Bar"/>
-        <object type="OSDev" gp_index="27" id="obj27" name="sda" osdev_type="0">
+        <object type="OSDev" gp_index="27" id="obj27" name="sda" osdev_type="1">
           <info name="Foo" value="Bar"/>
         </object>
-        <object type="OSDev" gp_index="28" id="obj28" name="sr0" osdev_type="0">
+        <object type="OSDev" gp_index="28" id="obj28" name="sr0" osdev_type="1">
           <info name="Foo" value="Bar"/>
         </object>
       </object>
@@ -170,6 +164,8 @@
   <cpukind cpuset="0x00000008" forced_efficiency="7">
     <info name="foo" value="bar"/>
     <info name="foo2" value="bar3"/>
+    <info name="foo3" value="bar4"/>
+    <info name="foo4" value="bar5"/>
   </cpukind>
   <cpukind cpuset="0x00000001" forced_efficiency="4">
     <info name="foo2" value="bar2"/>
@@ -178,4 +174,11 @@
     <info name="foo" value="bar"/>
     <info name="foo2" value="bar2"/>
   </cpukind>
+  <info name="Backend" value="Linux"/>
+  <info name="OSName" value="Linux"/>
+  <info name="OSRelease" value="3.2.0-3-amd64"/>
+  <info name="OSVersion" value="#1 SMP Thu Jun 28 09:07:26 UTC 2012"/>
+  <info name="HostName" value="rhododendron"/>
+  <info name="Architecture" value="x86_64"/>
+  <info name="Foooo" value="Barrr"/>
 </topology>

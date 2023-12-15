@@ -53,7 +53,7 @@ static int dump_one_proc(hwloc_topology_t topo, hwloc_obj_t pu, const char *path
   int has_intel_sgx = 0;
   int has_amd_topoext = 0;
   FILE *output;
-  int err;
+  int is_amd, err;
 
   err = hwloc_set_cpubind(topo, pu->cpuset, HWLOC_CPUBIND_PROCESS);
   if (err < 0) {
@@ -90,6 +90,15 @@ static int dump_one_proc(hwloc_topology_t topo, hwloc_obj_t pu, const char *path
   /* 0x0 = Highest cpuid + Vendor string */
   regs[0] = 0x0;
   dump_one_cpuid(output, regs, 0x1);
+
+  /* AuthenticAMD */
+#define AMD_EBX ('A' | ('u'<<8) | ('t'<<16) | ('h'<<24))
+#define AMD_EDX ('e' | ('n'<<8) | ('t'<<16) | ('i'<<24))
+#define AMD_ECX ('c' | ('A'<<8) | ('M'<<16) | ('D'<<24))
+  if (regs[1] == AMD_EBX && regs[2] == AMD_ECX && regs[3] == AMD_EDX)
+    is_amd = 1;
+  else
+    is_amd = 0;
 
   /* 0x1 = Family, Model, Stepping, Topology, Features */
   if (highest_cpuid >= 0x1) {
@@ -171,9 +180,15 @@ static int dump_one_proc(hwloc_topology_t topo, hwloc_obj_t pu, const char *path
     for(i=0; i<256; i++) {
       regs[0] = 0xb; regs[2] = i;
       dump_one_cpuid(output, regs, 0x5);
-      if (!(regs[2] & 0xff00))
-	/* invalid, no more levels */
-	break;
+      if (is_amd) {
+        /* AMD invalid (no more levels) = logprocatthislevel = ebx[0:15] == 0 */
+        if (!(regs[1] & 0xffff))
+          break;
+      } else {
+        /* Intel invalid (no more levels) = invalid level type = ecx[8:15] == 0 */
+        if (!(regs[2] & 0xff00))
+          break;
+      }
     }
     if (i == 256)
       fprintf(output, "# stopped at ecx=256\n");
@@ -205,7 +220,7 @@ static int dump_one_proc(hwloc_topology_t topo, hwloc_obj_t pu, const char *path
     }
   }
 
-  /* 0xf = Platform/L3 QoS enumeration on Intel ; Reserved on AMD */
+  /* 0xf = Platform/L3 QoS enumeration on Intel and AMD */
   if (highest_cpuid >= 0xf) {
     regs[0] = 0xf; regs[2] = 0;
     dump_one_cpuid(output, regs, 0x5);
@@ -213,7 +228,7 @@ static int dump_one_proc(hwloc_topology_t topo, hwloc_obj_t pu, const char *path
     dump_one_cpuid(output, regs, 0x5);
   }
 
-  /* 0x10 = Platform/L3 QoS enforcement enumeration on Intel ; Reserved on AMD */
+  /* 0x10 = Platform/L3 QoS enforcement enumeration on Intel and AMD */
   if (highest_cpuid >= 0x10) {
     /* Intel Resource Director Technology (Intel RDT) Allocation */
     regs[0] = 0x10; regs[2] = 0;
@@ -221,10 +236,10 @@ static int dump_one_proc(hwloc_topology_t topo, hwloc_obj_t pu, const char *path
     /* L3 Cache Allocation Technology */
     regs[0] = 0x10; regs[2] = 1;
     dump_one_cpuid(output, regs, 0x5);
-    /* L2 Cache Allocation Technology */
+    /* L2 Cache Allocation Technology on Intel */
     regs[0] = 0x10; regs[2] = 2;
     dump_one_cpuid(output, regs, 0x5);
-    /* Memory Bandwidth Allocation */
+    /* Memory Bandwidth Allocation on Intel */
     regs[0] = 0x10; regs[2] = 3;
     dump_one_cpuid(output, regs, 0x5);
   }
@@ -364,7 +379,7 @@ static int dump_one_proc(hwloc_topology_t topo, hwloc_obj_t pu, const char *path
     /* eax is number of subleaves but subleaves aren't documented?! */
   }
 
-  /* 0x21 is reserved on Intel */
+  /* 0x21 is reserved on Intel and AMD */
 
   if (highest_cpuid > 0x21) {
     static int reported = 0;
@@ -498,7 +513,28 @@ static int dump_one_proc(hwloc_topology_t topo, hwloc_obj_t pu, const char *path
     dump_one_cpuid(output, regs, 0x1);
   }
 
-  if (highest_ext_cpuid > 0x80000022) {
+  /* 0x80000023 = Secure Multi-Key Encryption on AMD ; Reserved on Intel */
+  if (highest_ext_cpuid >= 0x80000023) {
+    regs[0] = 0x80000023;
+    dump_one_cpuid(output, regs, 0x1);
+  }
+
+  /* 0x80000026 = Extended CPU Topology on AMD ; Reserved on Intel */
+  if (highest_ext_cpuid >= 0x80000026) {
+    for(i=0; i<256; i++) {
+      regs[0] = 0x80000026; regs[2] = i;
+      dump_one_cpuid(output, regs, 0x5);
+      if (!(regs[1] & 0xffff))
+	/* nothing here, no more levels */
+	break;
+    }
+    if (i == 256)
+      fprintf(output, "# stopped at ecx=256\n");
+  }
+
+  /* AMD Genoa reports highest_ext_cpuid == 0x80000028 but these last 2 leaves aren't documented yet */
+
+  if (highest_ext_cpuid > 0x80000026) {
     static int reported = 0;
     if (!reported)
       fprintf(stderr, "WARNING: Processor supports new extended CPUID leaves upto 0x%x\n", highest_ext_cpuid);
@@ -515,10 +551,10 @@ void usage(const char *callname, FILE *where)
   fprintf(where, "Usage : %s [ options ] ... [ outdir ]\n", callname);
   fprintf(where, "  outdir is an optional output directory instead of cpuid/\n");
   fprintf(where, "Options:\n");
-  fprintf(where, "  -c <n>       Only gather for logical processor with logical index <n>\n");
-  fprintf(where, "  -s --silent  Do not show verbose messages\n");
-  fprintf(where, "  --version    Report version and exit\n");
-  fprintf(where, "  -h --help    Show this usage\n");
+  fprintf(where, "  -c <n>          Only gather for logical processor with logical index <n>\n");
+  fprintf(where, "  -q --quiet -s   Do not show verbose messages\n");
+  fprintf(where, "  --version       Report version and exit\n");
+  fprintf(where, "  -h --help       Show this usage\n");
 }
 
 int main(int argc, const char * const argv[])
@@ -554,7 +590,8 @@ int main(int argc, const char * const argv[])
       idx = atoi(argv[1]);
       argc -= 2;
       argv += 2;
-    } else if (argc >= 1 && (!strcmp(argv[0], "-s") || !strcmp(argv[0], "--silent"))) {
+    } else if (argc >= 1 && (!strcmp(argv[0], "-q") || !strcmp(argv[0], "--quiet")
+                             || !strcmp(argv[0], "-s") || !strcmp(argv[0], "--silent"))) {
       verbose--;
       argc--;
       argv++;

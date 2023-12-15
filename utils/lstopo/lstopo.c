@@ -4,6 +4,7 @@
  * Copyright © 2009-2012, 2015, 2017 Université Bordeaux
  * Copyright © 2009-2011 Cisco Systems, Inc.  All rights reserved.
  * Copyright © 2020 Hewlett Packard Enterprise.  All rights reserved.
+ * Copyright © 2023 Université de Reims Champagne-Ardenne.  All rights reserved.
  * See COPYING in top-level directory.
  */
 
@@ -77,7 +78,7 @@ FILE *open_output(const char *filename, int overwrite)
   return fopen(filename, "w");
 }
 
-static hwloc_obj_t insert_task(hwloc_topology_t topology, hwloc_cpuset_t cpuset, const char * name, int thread)
+static hwloc_obj_t insert_misc(hwloc_topology_t topology, hwloc_cpuset_t cpuset, const char *subtype, const char * name)
 {
   hwloc_obj_t group, obj;
 
@@ -98,16 +99,16 @@ static hwloc_obj_t insert_task(hwloc_topology_t topology, hwloc_cpuset_t cpuset,
     hwloc_bitmap_asprintf(&s, cpuset);
     group = hwloc_get_obj_covering_cpuset(topology, cpuset);
     hwloc_bitmap_asprintf(&gs, group->cpuset);
-    fprintf(stderr, "%s `%s' binding %s doesn't match any object, extended to %s before inserting the %s in the topology.\n",
-	    thread ? "Thread" : "Process", name, s, gs, thread ? "thread" : "process");
+    fprintf(stderr, "%s `%s' binding %s doesn't match any object, extended to %s before inserting the object.\n",
+	    subtype, name, s, gs);
     free(s);
     free(gs);
   }
   obj = hwloc_topology_insert_misc_object(topology, group, name);
   if (!obj)
     fprintf(stderr, "Failed to insert process `%s'\n", name);
-  else
-    obj->subtype = strdup("Process");
+  else if (subtype)
+    obj->subtype = strdup(subtype);
 
   return obj;
 }
@@ -116,6 +117,7 @@ static void foreach_process_cb(hwloc_topology_t topology,
 			       struct hwloc_ps_process *proc,
 			       void *cbdata __hwloc_attribute_unused)
 {
+  /* sort of similar to print_process_lstopo_misc() in hwloc-ps.c */
   char name[100];
   unsigned i;
 
@@ -124,7 +126,7 @@ static void foreach_process_cb(hwloc_topology_t topology,
     snprintf(name, sizeof(name), "%ld %s", proc->pid, proc->name);
 
   if (proc->bound)
-    insert_task(topology, proc->cpuset, name, 0);
+    insert_misc(topology, proc->cpuset, "Process", name);
 
   if (proc->nthreads)
     for(i=0; i<proc->nthreads; i++)
@@ -136,7 +138,7 @@ static void foreach_process_cb(hwloc_topology_t topology,
 	else
 	  snprintf(task_name, sizeof(task_name), "%s %li", name, proc->threads[i].tid);
 
-	insert_task(topology, proc->threads[i].cpuset, task_name, 1);
+	insert_misc(topology, proc->threads[i].cpuset, "Thread", task_name);
       }
 }
 
@@ -151,6 +153,77 @@ static void add_process_objects(hwloc_topology_t topology)
   hwloc_ps_foreach_process(topology, root->cpuset,
 			   foreach_process_cb, NULL,
 			   HWLOC_PS_FLAG_THREADS | HWLOC_PS_FLAG_SHORTNAME, NULL, HWLOC_PS_ALL_UIDS);
+}
+
+static void add_one_misc_object_from(hwloc_topology_t topology,
+                                     char *subtype, char *name, hwloc_bitmap_t cpuset)
+{
+  if (!hwloc_bitmap_iszero(cpuset) && subtype && name) {
+    insert_misc(topology, cpuset, subtype, name);
+  } else {
+    char *s;
+    hwloc_bitmap_asprintf(&s, cpuset);
+    fprintf(stderr, "Ignoring misc object subtype %s name %s cpuset %s\n", subtype, name, s);
+    free(s);
+  }
+}
+
+/* reads Misc description from the FILE*
+ * entries must look like:
+ * name=... (must be first)
+ * cpuset=... (cannot be 0)
+ * subtype=... (optional)
+ */
+static void add_misc_objects_from(hwloc_topology_t topology, FILE *from)
+{
+  char line[256];
+  hwloc_bitmap_t cpuset;
+  char *subtype = NULL;
+  char *name = NULL;
+  cpuset = hwloc_bitmap_alloc();
+  if (!cpuset)
+    return;
+
+  while (fgets(line, sizeof line, from)) {
+    char *end;
+
+    /* remove ending \n */
+    end = strchr(line, '\n');
+    if (end)
+      *end = '\0';
+    /* ignoring empty lines */
+    if (line[0] == '\0')
+      continue;
+
+    if (!strncmp(line, "name=", 5)) {
+      /* commit (or ignore) the previous entry */
+      if (name)
+        add_one_misc_object_from(topology, subtype, name, cpuset);
+      /* start a new entry */
+      free(subtype);
+      subtype = NULL;
+      free(name);
+      name = strdup(line+5);
+      hwloc_bitmap_zero(cpuset);
+
+    } else if (!strncmp(line, "cpuset=", 7)) {
+      hwloc_bitmap_sscanf(cpuset, line+7);
+
+    } else if (!strncmp(line, "subtype=", 8)) {
+      free(subtype);
+      subtype = strdup(line+8);
+
+    } else {
+      fprintf(stderr, "Unrecognized --misc-from line `%s', ignored\n", line);
+    }
+  }
+
+  /* commit (or ignore) the last entry */
+  if (name)
+    add_one_misc_object_from(topology, subtype, name, cpuset);
+  free(name);
+  free(subtype);
+  hwloc_bitmap_free(cpuset);
 }
 
 static __hwloc_inline void lstopo_update_factorize_bounds(unsigned min, unsigned *first, unsigned *last)
@@ -263,7 +336,7 @@ lstopo_add_cpukind_style(struct lstopo_output *loutput, hwloc_topology_t topolog
   nr = hwloc_cpukinds_get_nr(topology, 0);
   for(i=0; i<nr; i++) {
     hwloc_obj_t obj;
-    hwloc_cpukinds_get_info(topology, i, cpuset, NULL, NULL, NULL, 0);
+    hwloc_cpukinds_get_info(topology, i, cpuset, NULL, NULL, 0);
     obj = NULL;
     while ((obj = hwloc_get_next_obj_inside_cpuset_by_type(topology, cpuset, HWLOC_OBJ_PU, obj)) != NULL)
       ((struct lstopo_obj_userdata *)obj->userdata)->cpukind_style = i;
@@ -303,11 +376,13 @@ lstopo_check_pci_domains(hwloc_topology_t topology)
 
 static void
 lstopo_parse_children_order(char *s, unsigned *children_order_p,
+                            enum lstopo_orient_e *above_force_orient_p,
                             enum lstopo_orient_e *right_force_orient_p,
                             enum lstopo_orient_e *below_force_orient_p)
 {
   char *tmp, *next;
   unsigned children_order;
+  enum lstopo_orient_e above_force_orient = LSTOPO_ORIENT_NONE;
   enum lstopo_orient_e right_force_orient = LSTOPO_ORIENT_NONE;
   enum lstopo_orient_e below_force_orient= LSTOPO_ORIENT_NONE;
 
@@ -327,6 +402,15 @@ lstopo_parse_children_order(char *s, unsigned *children_order_p,
 
     if (!strcmp(tmp, "memory:above") || !strcmp(tmp, "memoryabove") /* backward compat with 2.5 */) {
       children_order |= LSTOPO_ORDER_MEMORY_ABOVE;
+    } else if (!strcmp(tmp, "memory:above:horiz")) {
+      children_order |= LSTOPO_ORDER_MEMORY_ABOVE;
+      above_force_orient = LSTOPO_ORIENT_HORIZ;
+    } else if (!strcmp(tmp, "memory:above:vert")) {
+      children_order |= LSTOPO_ORDER_MEMORY_ABOVE;
+      above_force_orient = LSTOPO_ORIENT_VERT;
+    } else if (!strcmp(tmp, "memory:above:rect")) {
+      children_order |= LSTOPO_ORDER_MEMORY_ABOVE;
+      above_force_orient = LSTOPO_ORIENT_RECT;
 
     } else if (!strcmp(tmp, "io:right")) {
       children_order |= LSTOPO_ORDER_IO_RIGHT;
@@ -384,6 +468,7 @@ lstopo_parse_children_order(char *s, unsigned *children_order_p,
   }
 
   *children_order_p = children_order;
+  *above_force_orient_p = above_force_orient;
   *right_force_orient_p = right_force_orient;
   *below_force_orient_p = below_force_orient;
 }
@@ -474,12 +559,12 @@ void usage(const char *name, FILE *where)
   fprintf (where, "  --output-format <format>\n");
   fprintf (where, "  --of <format>         Force the output to use the given format\n");
   fprintf (where, "  --obj-snprintf-flags <n>\n"
-                  "  --osflags <n>         Change object type and attribute printing flags\n");
+                  "  --osf <n>             Change object type and attribute printing flags\n");
   fprintf (where, "  -f --force            Overwrite the output file if it exists\n");
   fprintf (where, "Textual output options:\n");
   fprintf (where, "  --only <type>         Only show objects of the given type in the textual output\n");
   fprintf (where, "  -v --verbose          Include additional details\n");
-  fprintf (where, "  -s --silent           Reduce the amount of details to show\n");
+  fprintf (where, "  -q --quiet -s         Reduce the amount of details to show\n");
   fprintf (where, "  --distances           Only show distance matrices\n");
   fprintf (where, "  --distances-transform <links|merge-switch-ports|transitive-closure>\n");
   fprintf (where, "                        Transform distances before displaying them\n");
@@ -564,6 +649,7 @@ void usage(const char *name, FILE *where)
 		  "                        Set flags during the synthetic topology export\n");
   /* --shmem-output-addr is undocumented on purpose */
   fprintf (where, "  --ps --top            Display processes within the hierarchy\n");
+  fprintf (where, "  --misc-from <file>    Create Misc objects as defined in <file>");
   fprintf (where, "  --version             Report version and exit\n");
   fprintf (where, "  -h --help             Show this usage\n");
 }
@@ -672,7 +758,7 @@ enum output_format {
 };
 
 static enum output_format
-parse_output_format(const char *name, char *callname __hwloc_attribute_unused)
+parse_output_format(const char *name, unsigned long *xml_flags)
 {
   if (!hwloc_strncasecmp(name, "default", 3))
     return LSTOPO_OUTPUT_DEFAULT;
@@ -701,7 +787,13 @@ parse_output_format(const char *name, char *callname __hwloc_attribute_unused)
     return LSTOPO_OUTPUT_CAIROSVG;
   else if (!strcasecmp(name, "nativesvg") || !strcasecmp(name, "svg(native)"))
     return LSTOPO_OUTPUT_NATIVESVG;
-  else if (!strcasecmp(name, "xml"))
+  else if (!strcasecmp(name, "v2xml")) {
+    *xml_flags |= HWLOC_TOPOLOGY_EXPORT_XML_FLAG_V2;
+    return LSTOPO_OUTPUT_XML;
+  } else if (!strcasecmp(name, "v3xml")) {
+    *xml_flags &= ~HWLOC_TOPOLOGY_EXPORT_XML_FLAG_V2;
+    return LSTOPO_OUTPUT_XML;
+  } else if (!strcasecmp(name, "xml"))
     return LSTOPO_OUTPUT_XML;
   else if (!strcasecmp(name, "shmem"))
     return LSTOPO_OUTPUT_SHMEM;
@@ -771,15 +863,15 @@ struct lstopo_type_filter { enum hwloc_type_filter_e filter; int changed; };
 /* must operate on same types as hwloc_topology_set_cache_types_filter() */
 #define set_cache_types_filter(_filter) do { \
   unsigned _i; \
-  for(_i=HWLOC_OBJ_L1CACHE; _i<HWLOC_OBJ_L3ICACHE; _i++) \
-    set_type_filter(_i, _filter);                        \
+  for(_i=HWLOC_OBJ_L1CACHE; _i<=HWLOC_OBJ_L3ICACHE; _i++) \
+    set_type_filter(_i, _filter);                         \
 } while (0)
 
 /* must operate on same types as hwloc_topology_set_icache_types_filter() */
 #define set_icache_types_filter(_filter) do { \
   unsigned _i; \
-  for(_i=HWLOC_OBJ_L1ICACHE; _i<HWLOC_OBJ_L3ICACHE; _i++) \
-    set_type_filter(_i, _filter);                         \
+  for(_i=HWLOC_OBJ_L1ICACHE; _i<=HWLOC_OBJ_L3ICACHE; _i++) \
+    set_type_filter(_i, _filter);                          \
 } while (0)
 
 #define apply_type_filters(_topo) do { \
@@ -804,7 +896,8 @@ main (int argc, char *argv[])
   hwloc_bitmap_t allow_cpuset = NULL, allow_nodeset = NULL;
   char * callname;
   char * input = NULL;
-  enum hwloc_utils_input_format input_format = HWLOC_UTILS_INPUT_DEFAULT;
+  const char *show_only_string = NULL;
+  struct hwloc_utils_input_format_s input_format = HWLOC_UTILS_INPUT_FORMAT_DEFAULT;
   enum output_format output_format = LSTOPO_OUTPUT_DEFAULT;
   struct lstopo_type_filter type_filter[HWLOC_OBJ_TYPE_MAX];
   char *restrictstring = NULL;
@@ -819,6 +912,7 @@ main (int argc, char *argv[])
 #endif
   char *env;
   int top = 0;
+  FILE * miscfrom = NULL;
   int opt;
   unsigned i;
 
@@ -866,11 +960,10 @@ main (int argc, char *argv[])
   loutput.show_memattrs_only = 0;
   loutput.show_cpukinds_only = 0;
   loutput.show_windows_processor_groups_only = 0;
-  loutput.show_only = HWLOC_OBJ_TYPE_NONE;
   loutput.show_cpuset = 0;
   loutput.show_taskset = 0;
   loutput.transform_distances = -1;
-  loutput.obj_snprintf_flags = 0;
+  loutput.obj_snprintf_flags = HWLOC_OBJ_SNPRINTF_FLAG_SHORT_NAMES;
 
   loutput.nr_cpukind_styles = 0;
 
@@ -896,6 +989,7 @@ main (int argc, char *argv[])
     loutput.force_orient[i] = LSTOPO_ORIENT_HORIZ;
   loutput.force_orient[HWLOC_OBJ_NUMANODE] = LSTOPO_ORIENT_HORIZ;
   loutput.force_orient[HWLOC_OBJ_MEMCACHE] = LSTOPO_ORIENT_HORIZ;
+  loutput.above_force_orient = LSTOPO_ORIENT_NONE;
   loutput.right_force_orient = LSTOPO_ORIENT_NONE;
   loutput.below_force_orient = LSTOPO_ORIENT_NONE;
   for(i=HWLOC_OBJ_TYPE_MIN; i<HWLOC_OBJ_TYPE_MAX; i++) {
@@ -939,7 +1033,8 @@ main (int argc, char *argv[])
       opt = 0;
       if (!strcmp (argv[0], "-v") || !strcmp (argv[0], "--verbose")) {
 	loutput.verbose_mode++;
-      } else if (!strcmp (argv[0], "-s") || !strcmp (argv[0], "--silent")) {
+      } else if (!strcmp (argv[0], "-q") || !strcmp (argv[0], "--quiet")
+                 || !strcmp (argv[0], "-s") || !strcmp (argv[0], "--silent")) {
 	loutput.verbose_mode--;
       } else if (!strcmp (argv[0], "--distances")) {
 	loutput.show_distances_only = 1;
@@ -985,8 +1080,7 @@ main (int argc, char *argv[])
       } else if (!strcmp (argv[0], "--only")) {
 	if (argc < 2)
 	  goto out_usagefailure;
-        if (hwloc_type_sscanf(argv[1], &loutput.show_only, NULL, 0) < 0)
-	  fprintf(stderr, "Unsupported type `%s' passed to --only, ignoring.\n", argv[1]);
+        show_only_string = argv[1];
 	opt = 1;
       }
       else if (!strcmp (argv[0], "--filter")) {
@@ -1383,7 +1477,7 @@ main (int argc, char *argv[])
 	if (argc < 2)
 	  goto out_usagefailure;
         lstopo_parse_children_order(argv[1], &loutput.children_order,
-                                    &loutput.right_force_orient, &loutput.below_force_orient);
+                                    &loutput.above_force_orient, &loutput.right_force_orient, &loutput.below_force_orient);
 	opt = 1;
       }
       else if (!strcmp (argv[0], "--no-cpukinds")) {
@@ -1452,13 +1546,25 @@ main (int argc, char *argv[])
 	loutput.pid_number = atoi(argv[1]); opt = 1;
       } else if (!strcmp (argv[0], "--ps") || !strcmp (argv[0], "--top"))
         top = 1;
-      else if (!strcmp (argv[0], "--version")) {
+      else if (!strcmp (argv[0], "--misc-from")) {
+	if (argc < 2)
+	  goto out_usagefailure;
+        if (!strcmp(argv[1], "-"))
+          miscfrom = stdin;
+        else
+          miscfrom = fopen(argv[1], "r");
+        if (!miscfrom) {
+          fprintf(stderr, "Failed open --misc-from %s file for reading (%s)\n", argv[1], strerror(errno));
+          exit(EXIT_FAILURE);
+        }
+        opt = 1;
+      } else if (!strcmp (argv[0], "--version")) {
           printf("%s %s\n", callname, HWLOC_VERSION);
           exit(EXIT_SUCCESS);
       } else if (!strcmp (argv[0], "--output-format") || !strcmp (argv[0], "--of")) {
 	if (argc < 2)
 	  goto out_usagefailure;
-        output_format = parse_output_format(argv[1], callname);
+        output_format = parse_output_format(argv[1], &loutput.export_xml_flags);
         opt = 1;
       } else {
 	if (filename) {
@@ -1499,7 +1605,7 @@ main (int argc, char *argv[])
     } else {
       char *dot = strrchr(filename, '.');
       if (dot) {
-        output_format = parse_output_format(dot+1, callname);
+        output_format = parse_output_format(dot+1, &loutput.export_xml_flags);
         if (dot == filename+1 && filename[0] == '-' && output_format != LSTOPO_OUTPUT_ERROR)
           filename = "-"; /* to simplify things later */
       } else {
@@ -1514,7 +1620,7 @@ main (int argc, char *argv[])
   /* if  the output format wasn't enforced, think a bit about what the user probably want */
   if (output_format == LSTOPO_OUTPUT_DEFAULT) {
     if (loutput.show_cpuset
-        || loutput.show_only != HWLOC_OBJ_TYPE_NONE
+        || show_only_string
 	|| loutput.show_distances_only
         || loutput.show_memattrs_only
         || loutput.show_cpukinds_only
@@ -1643,6 +1749,7 @@ main (int argc, char *argv[])
 
   if (loutput.verbose_mode > 1) {
     loutput.obj_snprintf_flags |= HWLOC_OBJ_SNPRINTF_FLAG_LONG_NAMES;
+    loutput.obj_snprintf_flags &= ~HWLOC_OBJ_SNPRINTF_FLAG_SHORT_NAMES;
     if (may_show_more_attributes)
       loutput.obj_snprintf_flags |= HWLOC_OBJ_SNPRINTF_FLAG_MORE_ATTRS;
   }
@@ -1671,7 +1778,7 @@ main (int argc, char *argv[])
     if (err)
       goto out_with_topology;
 
-    if (input_format != HWLOC_UTILS_INPUT_DEFAULT) {
+    if (input_format.format != HWLOC_UTILS_INPUT_DEFAULT) {
       /* add the input path to the window title */
       snprintf(loutput.title, sizeof(loutput.title), "lstopo - %s", input);
 
@@ -1704,7 +1811,7 @@ main (int argc, char *argv[])
     }
   }
 
-  if (input_format == HWLOC_UTILS_INPUT_XML
+  if (input_format.format == HWLOC_UTILS_INPUT_XML
       && output_format == LSTOPO_OUTPUT_XML) {
     /* must be after parsing output format and before loading the topology */
     putenv((char *) "HWLOC_XML_USERDATA_NOT_DECODED=1");
@@ -1723,7 +1830,7 @@ main (int argc, char *argv[])
     clock_gettime(CLOCK_MONOTONIC, &ts1);
 #endif
 
-  if (input_format == HWLOC_UTILS_INPUT_SHMEM) {
+  if (input_format.format == HWLOC_UTILS_INPUT_SHMEM) {
 #ifdef HWLOC_WIN_SYS
     fprintf(stderr, "shmem topology not supported\n"); /* this line must match the grep line in test-lstopo-shmem */
     goto out_with_topology;
@@ -1752,6 +1859,14 @@ main (int argc, char *argv[])
     printf("hwloc_topology_load() took %lu ms\n", ms);
   }
 #endif
+
+  /********************************
+   * Clean input format's internal variables
+   */
+
+  if (input) {
+    hwloc_utils_disable_input_format(&input_format);
+  }
 
   /********************************
    * Tweak the topology and output
@@ -1787,6 +1902,8 @@ main (int argc, char *argv[])
 
   if (top)
     add_process_objects(topology);
+  if (miscfrom)
+    add_misc_objects_from(topology, miscfrom);
 
   if (restrictstring) {
     hwloc_bitmap_t restrictset = hwloc_bitmap_alloc();
@@ -1831,6 +1948,16 @@ main (int argc, char *argv[])
     lstopo_add_collapse_attributes(topology);
   }
 
+  loutput.show_only.depth = HWLOC_TYPE_DEPTH_UNKNOWN; /* disable this feature by default */
+  if (show_only_string) {
+    err = hwloc_calc_parse_level(NULL, topology, show_only_string, strlen(show_only_string), &loutput.show_only);
+    if (err < 0 && loutput.show_only.depth == HWLOC_TYPE_DEPTH_UNKNOWN) {
+      fprintf(stderr, "level %s passed to --only is unavailable.\n", show_only_string);
+      goto out_with_topology;
+    }
+    /* multiple depth is ok */
+  }
+
   /******************
    * Output for real
    */
@@ -1867,9 +1994,12 @@ main (int argc, char *argv[])
   lstopo_destroy_userdata(hwloc_get_root_obj(topology));
   hwloc_topology_destroy(topology);
  out:
+  if (input) hwloc_utils_disable_input_format(&input_format);
   hwloc_bitmap_free(allow_cpuset);
   hwloc_bitmap_free(allow_nodeset);
   hwloc_bitmap_free(loutput.cpubind_set);
   hwloc_bitmap_free(loutput.membind_set);
+  if (miscfrom && miscfrom != stdin)
+    fclose(miscfrom);
   return EXIT_FAILURE;
 }

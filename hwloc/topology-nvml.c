@@ -1,5 +1,5 @@
 /*
- * Copyright © 2012-2022 Inria.  All rights reserved.
+ * Copyright © 2012-2023 Inria.  All rights reserved.
  * See COPYING in top-level directory.
  */
 
@@ -42,7 +42,7 @@ hwloc__nvml_get_peer_obj_by_pci(struct hwloc_topology *topology, hwloc_obj_t gpu
     if (pfilter != HWLOC_TYPE_FILTER_KEEP_NONE) {
       static int warned = 0;
       if (!warned && HWLOC_SHOW_ALL_ERRORS())
-        fprintf(stderr, "hwloc failed to find NVLink peer %04x:%02x:%02x\n",
+        fprintf(stderr, "hwloc/nvml: failed to find NVLink peer %04x:%02x:%02x\n",
                 peer_bdf.domain, peer_bdf.bus, peer_bdf.device);
       warned = 1;
     } else {
@@ -90,7 +90,7 @@ hwloc__nvml_get_peer_obj_by_pci(struct hwloc_topology *topology, hwloc_obj_t gpu
   default: {
     static int warned = 0;
     if (!warned && HWLOC_SHOW_ALL_ERRORS())
-      fprintf(stderr, "hwloc failed to recognize NVLink peer %04x:%02x:%02x class %04x prog-if %02x vendor %04x device %04x\n",
+      fprintf(stderr, "hwloc/nvml: failed to recognize NVLink peer %04x:%02x:%02x class %04x prog-if %02x vendor %04x device %04x\n",
               peer_bdf.domain, peer_bdf.bus, peer_bdf.device,
               obj->attr->pcidev.class_id, obj->attr->pcidev.prog_if, obj->attr->pcidev.vendor_id, obj->attr->pcidev.device_id);
     warned = 1;
@@ -159,7 +159,7 @@ hwloc_nvml_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dst
   struct hwloc_topology *topology = backend->topology;
   enum hwloc_type_filter_e filter;
   nvmlReturn_t ret;
-  unsigned nb, i;
+  unsigned nb, i, added = 0;
 #ifdef NVML_NVLINK_MAX_LINKS
   unsigned nbobjs, j;
   hwloc_obj_t *objs;
@@ -222,9 +222,8 @@ hwloc_nvml_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dst
     osdev->name = strdup(buffer);
     osdev->subtype = strdup("NVML");
     osdev->depth = HWLOC_TYPE_DEPTH_UNKNOWN;
-    osdev->attr->osdev.type = HWLOC_OBJ_OSDEV_GPU;
+    osdev->attr->osdev.type = HWLOC_OBJ_OSDEV_COPROC | HWLOC_OBJ_OSDEV_GPU;
 
-    hwloc_obj_add_info(osdev, "Backend", "NVML");
     hwloc_obj_add_info(osdev, "GPUVendor", "NVIDIA Corporation");
 
     buffer[0] = '\0';
@@ -272,6 +271,7 @@ hwloc_nvml_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dst
 #ifdef NVML_NVLINK_MAX_LINKS
     objs[i] = osdev;
 #endif
+    added++;
   }
 
 #ifdef NVML_NVLINK_MAX_LINKS
@@ -352,17 +352,22 @@ hwloc_nvml_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dst
           continue;
 
         hwloc_debug("GPU #%u NVLink #%u has version %u\n", i, j, version);
-        /* version1 = 20GB/s, version2=25GB/s */
+        /* NVIDIA often shows bidirection bandwidths,
+         * or even the bidirectional bandwidth of all links agregated for a single GPU
+         * 160GB/s on P100 (4 links), 300 on V100 (6), 600 on A100 (12), 900 on H100 (18 links).
+         *
+         * The actual unidirectional bandwidth we want is 20GB/s for v1, and 25GB/s for v2+.
+         * v3 has twice bigger pairs than v2 but half the number of pairs per (sub-)link.
+         * v4 and v3 seem identical.
+         */
         if (version == 1) {
           bw = 20000; /* multiple links may connect same GPUs */
-        } else if (version == 2) {
+        } else if (version >= 2 && version <= 4) {
           bw = 25000; /* multiple links may connect same GPUs */
-        } else if (version == 3 || version == 4) {
-          bw = 50000; /* multiple links may connect same GPUs */
         } else {
           static int warned = 0;
           if (!warned && HWLOC_SHOW_ALL_ERRORS())
-            fprintf(stderr, "Failed to recognize NVLink version %u\n", version);
+            fprintf(stderr, "hwloc/nvml: Failed to recognize NVLink version %u\n", version);
           warned = 1;
           continue;
         }
@@ -392,6 +397,9 @@ hwloc_nvml_discover(struct hwloc_backend *backend, struct hwloc_disc_status *dst
 #endif /* NVML_NVLINK_MAX_LINKS */
 
   nvmlShutdown();
+
+  if (added)
+    hwloc_modify_infos(hwloc_topology_get_infos(topology), HWLOC_MODIFY_INFOS_OP_ADD, "Backend", "NVML");
   return 0;
 }
 
@@ -405,7 +413,7 @@ hwloc_nvml_component_instantiate(struct hwloc_topology *topology,
 {
   struct hwloc_backend *backend;
 
-  backend = hwloc_backend_alloc(topology, component);
+  backend = hwloc_backend_alloc(topology, component, 0);
   if (!backend)
     return NULL;
   backend->discover = hwloc_nvml_discover;
