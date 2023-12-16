@@ -238,7 +238,7 @@ if (STANDALONE)
     install(EXPORT ${PROJECT_NAME}_Targets
             FILE ${PROJECT_NAME}Targets.cmake
             NAMESPACE ${PROJECT_NAME}::
-            DESTINATION lib/cmake/hwloc)
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/cmake)
 
     write_basic_package_version_file("${PROJECT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
             VERSION ${PROJECT_VERSION}
